@@ -26,7 +26,7 @@ export function createRace(ctx) {
     trackId: ctx.track.id, laps: ctx.laps, scale: ctx.scale || 1, time: 0, lap: 1, rngS: rng.s,
     weather: ctx.weather, wetness: ctx.weather.wet[0], sc: { state: 'none', lapsLeft: 0, count: 0, vscCount: 0 },
     cars: [], log: [], radio: [], pending: [], chequered: false, finished: false, lineTimes: [0],
-    degMult: ctx.degMult || 1, difficulty: ctx.difficulty || 'standard', lapChart: [], alerts: {}, stats: { overtakes: 0 },
+    degMult: ctx.degMult || 1, trackTemp: ctx.weather.trackTemp || 35, fullThrottle: ctx.fullThrottle || 0.6, yellow: null, red: 0, difficulty: ctx.difficulty || 'standard', lapChart: [], alerts: {}, stats: { overtakes: 0 },
   };
   const t = ctx.track;
   const fuelStart = 100;
@@ -34,7 +34,7 @@ export function createRace(ctx) {
     race.cars.push({
       id: e.driverId, driverId: e.driverId, teamId: e.teamId, name: e.name, short: e.short, abbr: e.abbr, color: e.color,
       isPlayer: !!e.isPlayer, slot: e.slot || 0, grid: e.grid, pos: e.grid,
-      drv: e.drv, car: e.car, perf: e.perf, setupQ: e.setupQ, setupFx: e.setupFx, crew: e.crew, relMult: e.relMult || 1, know: e.know ?? 0.62,
+      sets: e.sets ? e.sets.map((x) => ({ ...x })) : null, drv: e.drv, car: e.car, perf: e.perf, setupQ: e.setupQ, setupFx: e.setupFx, crew: e.crew, relMult: e.relMult || 1, know: e.know ?? 0.62,
       plan: e.plan, planIdx: 0, autoPlan: e.isPlayer ? e.autoPlan !== false : true, aiStyle: e.aiStyle || 'calculated',
       tyre: { c: e.plan.start, age: 0, wear: e.startWear || 0 }, compoundsUsed: [e.plan.start],
       fuel: fuelStart * (e.fuelLoad || 1), fuelTarget: e.fuelLoad || 1, mode: 'normal', ers: 'balanced', battery: 70,
@@ -66,7 +66,19 @@ export function lapTime(race, c, t, rng, isFirst = false) {
   const m = MODE[c.mode] || MODE.normal;
   const e = ERS[c.battery <= 0 && (c.ers === 'deploy' || c.ers === 'overtake') ? 'harvest' : c.ers] || ERS.balanced;
   let lt = t.baseLap + c.perf + (100 - c.drv.pace) * 0.035 + (1 - c.setupQ) * 0.9;
-  lt += tyrePaceLoss(c.tyre) + wetPenalty(c.tyre.c, w);
+  lt += tyrePaceLoss(c.tyre, race.trackTemp) + wetPenalty(c.tyre.c, w);
+  // Slipstream & dirty air (2026-style cars keep ~80–90% downforce at 1–2 car lengths; the tow adds ~10–15 km/h on straights)
+  c.tow = 0; c.dirtyLoss = 0;
+  const ah = carAhead(race, c);
+  if (!isFirst && ah && !ah.finished && ah.lapsDone === c.lapsDone && race.sc.state === 'none') {
+    const gap = c.lapEnd - ah.lapEnd;
+    if (gap > 0 && gap < 1.2) {
+      const ft = race.fullThrottle || 0.6; const k = 1 - gap / 1.2;
+      c.tow = ft * 0.28 * k * (0.6 + t.drag * 0.6);           // time gained on straights
+      c.dirtyLoss = (1 - ft) * t.df * 0.45 * k * (1 - 0.2 * ((c.drv.craft ?? 75) - 70) / 30); // time lost in corners (less downforce)
+      lt += c.dirtyLoss - c.tow; c.dirty = true;
+    } else c.dirty = false;
+  } else c.dirty = false;
   lt += w * 6 + w * (100 - c.drv.wet) * 0.04;
   lt += c.fuel * 0.032 * (t.baseLap / 85);
   lt += m.pace + e.pace + c.damage + c.failurePen - ((c.know ?? 0.62) - 0.62) * 0.3;
@@ -128,7 +140,7 @@ function processLap(race, c, t, rng) {
   if (c.lapsDone > race.lineTimes.length - 1) { race.lineTimes.push(c.total); onLeaderLap(race, c, t, rng); }
   // wear & consumption for completed lap
   const pers = PERSONALITIES[c.drv.pers] || PERSONALITIES.teamplayer;
-  const w = wearPerLap({ c: c.tyre.c, track: t, car: c.car, driver: c.drv, mode: c.mode, wetness: race.wetness, dirty: c.dirty, sc: !green, setupWear: c.setupFx.wearMult, pers: pers.wear, scale: race.scale, frontBias: c.setupFx.frontBias });
+  const w = wearPerLap({ c: c.tyre.c, track: t, car: c.car, driver: c.drv, mode: c.mode, wetness: race.wetness, dirty: c.dirty, sc: !green, trackTemp: race.trackTemp, setupWear: c.setupFx.wearMult, pers: pers.wear, scale: race.scale, frontBias: c.setupFx.frontBias });
   c.tyre.wear = clamp(c.tyre.wear + w * (race.degMult || 1), 0, 100); c.tyre.age++;
   if (c.know != null) c.know = Math.min(1, c.know + 0.006 * race.scale * (1 - c.know));
   if (c.isPlayer && c.lapsDone === Math.max(2, Math.round(3 / race.scale)) && !race.alerts.planAsk && race.cars.some((x) => x.isPlayer && !x.dnf && x.plan.stops.length > x.planIdx)) {
@@ -171,7 +183,12 @@ function processLap(race, c, t, rng) {
   // crash / off
   const crashP = 0.0006 * pers.inc * m.inc * (1 + race.wetness * 3 * (1.3 - c.drv.wet / 100) + wetPenalty(c.tyre.c, race.wetness) * 0.06) * (1 + (100 - c.drv.cons) / 40) * race.scale * c.setupFx.damageRisk * (c.tyre.wear > COMPOUNDS[c.tyre.c].cliff ? 1.6 : 1);
   if (green && rng.chance(crashP)) {
-    if (rng.chance(0.55)) return retire(race, c, 'Crashed', t, rng, false, true);
+    const sector = rng.int(1, 3);
+    if (rng.chance(0.55)) {
+      if (race.sc.state === 'none' && race.lap < race.laps - 3 && rng.chance(0.1 + race.wetness * 0.2)) { retireQuiet(race, c, 'Crashed'); return redFlag(race, rng, `${c.name} heavy crash, barrier repairs needed`); }
+      return retire(race, c, 'Crashed', t, rng, false, true);
+    }
+    race.yellow = { sector, lap: race.lap }; pushLog(race, race.lap, `🟨 Yellow flag, sector ${sector}: ${c.name} off the track. No overtaking or DRS in that sector.`, 'warn');
     applyDamage(race, c, rng, 'Off-track excursion');
   }
   // kerb damage due to low ride height
@@ -186,7 +203,7 @@ function processLap(race, c, t, rng) {
   // tyre cliff warning
   if (c.isPlayer && c.tyre.wear > COMPOUNDS[c.tyre.c].cliff - 4 && !c._cliffWarned && !c.pitReq) {
     c._cliffWarned = true; radio(race, c, 'Tyres are going off — rear grip is dropping fast.');
-    raise(race, { type: 'cliff', carId: c.id, text: `${c.short}'s ${COMPOUNDS[c.tyre.c].name}s are near the performance cliff (wear ~${Math.round(c.tyre.wear)}%).` });
+    raise(race, { type: 'cliff', carId: c.id, text: `${c.short}'s ${COMPOUNDS[c.tyre.c].name}s are near the performance cliff (grip ~${Math.round(100 - c.tyre.wear)}%).` });
   }
   // pit decision
   let pitLoss = 0;
@@ -229,6 +246,8 @@ function resolveBattle(race, c, ahead, end, t, rng) {
   if (ahead.ers === 'overtake' && ahead.battery > 0) p -= 0.08;
   p += (c.setupFx.topSpeed - ahead.setupFx.topSpeed) * 1.5 * t.drag;
   p *= pers.ovt;
+  if (race.yellow) p *= 0.6; // one sector under local yellows: no passing there
+  p += (c.tow || 0) * 0.25;
   if (ahead.teamId === c.teamId && ahead.orders === 'letby') p = 0.95;
   p = clamp(p, 0.02, 0.92);
   if (rng.chance(p)) {
@@ -268,6 +287,14 @@ function retire(race, c, why, t, rng, mech, crash = false) {
   updateOrder(race);
 }
 
+function retireQuiet(race, c, why) { c.dnf = why; c.incidents.push({ lap: c.lapsDone, text: why }); pushLog(race, c.lapsDone, `${c.name} retires: ${why}.`, 'bad', c.id); if (c.isPlayer) radio(race, c, 'Big one… I\'m OK, but the car is done.'); updateOrder(race); }
+// RED FLAG: race suspended; everyone goes to the pit lane, free tyre change, restart behind the safety car.
+function redFlag(race, rng, why) {
+  race.red = 2; race.sc = { ...race.sc, state: 'sc', lapsLeft: 2, red: true }; race.sc.count++;
+  pushLog(race, race.lap, `🟥 RED FLAG — ${why}. Race suspended; free tyre change, restart behind the Safety Car.`, 'bad');
+  for (const x of race.cars) if (!x.isPlayer && !x.dnf && !x.finished) x.pitReq = { c: bestCompoundFor(race, x) };
+  raise(race, { type: 'red', text: `RED FLAG: ${why}. Cars return to the pit lane. Tyre changes are FREE (no time lost). Choose tyres for the restart.` });
+}
 function deploySC(race, type, rng, why) {
   race.sc = { ...race.sc, state: type, lapsLeft: type === 'sc' ? rng.int(3, 5) : rng.int(1, 3) };
   if (type === 'sc') race.sc.count++; else race.sc.vscCount++;
@@ -280,6 +307,8 @@ function onLeaderLap(race, leader, t, rng) {
   const prevW = race.wetness;
   race.wetness = race.weather.wet[Math.min(race.lap, race.weather.wet.length - 1)] || 0;
   race.lapChart.push(updateOrder(race).map((c) => c.id));
+  if (race.yellow && race.lap > race.yellow.lap) race.yellow = null;
+  if (race.red > 0) { race.red--; if (!race.red) pushLog(race, race.lap, 'Race resumes behind the Safety Car.', 'info'); }
   if (race.sc.state !== 'none') {
     race.sc.lapsLeft--;
     if (race.sc.lapsLeft <= 0) { pushLog(race, race.lap, race.sc.state === 'sc' ? 'Safety car in this lap — green flag!' : 'VSC ending — green flag!', 'info'); race.sc.state = 'none'; race.drsFrom = race.lap + 2; pushLog(race, race.lap, 'DRS disabled — enabled again in 2 laps.', 'muted'); }
@@ -322,9 +351,12 @@ function pitDecision(race, c, t, rng) {
   // weather reactions (AI; player auto-plan follows engineer)
   const lag = c.aiStyle === 'conservative' ? 0.06 : c.aiStyle === 'aggressive' ? -0.02 : 0.02;
   const pl = player ? 0.05 : 0; // engineer auto-calls for player are slightly cautious
-  if (onDry && w > 0.17 + lag + pl) return { c: w > 0.62 ? 'W' : 'I' };
-  if (!onDry && w < 0.1 - lag * 0.5 - pl && lapsLeft > 2) return { c: bestCompoundFor(race, c) };
-  if (c.tyre.c === 'W' && w < 0.5 - pl && lapsLeft > 3) return { c: 'I' };
+  // the player's deliberate tyre choice (e.g. Inters on a damp-but-drying track) is respected until conditions first match it
+  if (player && !c._wxArmed && ((onDry && w < 0.15) || (!onDry && w > 0.15))) c._wxArmed = true;
+  const wxOk = !player || c._wxArmed;
+  if (wxOk && onDry && w > 0.17 + lag + pl) return { c: w > 0.62 ? 'W' : 'I' };
+  if (wxOk && !onDry && w < 0.1 - lag * 0.5 - pl && lapsLeft > 2) return { c: bestCompoundFor(race, c) };
+  if (wxOk && c.tyre.c === 'W' && w < 0.5 - pl && lapsLeft > 3) return { c: 'I' };
   const C = COMPOUNDS[c.tyre.c];
   const next = c.plan.stops[c.planIdx];
   // cheap stop under SC/VSC
@@ -353,10 +385,16 @@ function doPit(race, c, d, t, rng) {
   let note = '';
   if (rng.chance(crew.err)) { const e = rng.range(1.5, 6); stat += e; note = ` (slow stop +${e.toFixed(1)}s)`; }
   if (c.damage > 0 && d.repair !== false) { stat += 6; note += ' + repair'; c.damage = 0; c.damageType = null; }
-  const lane = t.pit * (race.sc.state === 'sc' ? 0.55 : race.sc.state === 'vsc' ? 0.6 : 1);
+  const lane = race.red > 0 ? 0 : t.pit * (race.sc.state === 'sc' ? 0.55 : race.sc.state === 'vsc' ? 0.6 : 1);
   if (d.c === c.tyre.c && d.keep) { return 0; }
   const old = c.tyre.c;
-  c.tyre = { c: d.c, age: 0, wear: 0 };
+  let startWear = 0;
+  if (Array.isArray(c.sets)) { // take the freshest remaining set of that compound
+    const cand = c.sets.filter((x) => x.c === d.c).sort((a, b) => a.wear - b.wear)[0];
+    if (cand) { startWear = cand.wear; c.sets.splice(c.sets.indexOf(cand), 1); } else startWear = 35; // none left: scrubbed spare
+  }
+  if (race.red > 0) stat = 0;
+  c.tyre = { c: d.c, age: 0, wear: startWear };
   if (!c.compoundsUsed.includes(d.c)) c.compoundsUsed.push(d.c);
   c.stints.push({ c: d.c, from: c.lapsDone + 1 });
   c._cliffWarned = false;
@@ -379,7 +417,7 @@ function teamOrderCheck(race, c, t) {
 }
 
 // DRS: disabled on laps 1–2, under SC/VSC, for 2 laps after a restart, and on a wet track.
-export function drsOn(race) { return race.sc.state === 'none' && race.lap > 2 && race.lap >= (race.drsFrom || 0) && race.wetness < 0.3; }
+export function drsOn(race) { return race.sc.state === 'none' && !race.yellow && race.lap > 2 && race.lap >= (race.drsFrom || 0) && race.wetness < 0.3; }
 export function raise(race, p) { race.pending.push({ ...p, id: race.pending.length + '_' + race.lap, lap: race.lap, shown: false }); }
 
 function finishRace(race) {

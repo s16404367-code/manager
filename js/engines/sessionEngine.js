@@ -5,7 +5,8 @@ import { RNG } from '../sim/rng.js';
 import { clamp } from '../sim/util.js';
 import { trackById, lapProfile } from '../data/tracks.js';
 import { effectiveCar, trackScore, carDeficitSec, setupQuality, setupEffects } from './carModel.js';
-import { COMPOUNDS, wetPenalty } from './tyreEngine.js';
+import { COMPOUNDS, wetPenalty, tyrePaceLoss, wearPerLap, bestFor } from './tyreEngine.js';
+import { lapProfile as lapProf } from '../data/tracks.js';
 import { aiSetupQ, applyProgram, commitQuali, PRACTICE_PROGRAMS, gainKnow, knowOf, AI_KNOW } from './weekendEngine.js';
 import { maxWear, ensurePC, COMP } from './components.js';
 
@@ -21,7 +22,7 @@ function carBase(state, did, wet, tyre) {
   const rng = new RNG((wk.seed ^ (did.length * 7919 + slot * 31 + d.name.charCodeAt(0))) >>> 0);
   const sq = team.isPlayer ? setupQuality(wk.setups[did], wk.opt[did]) : aiSetupQ(team, rng);
   const fx = team.isPlayer ? setupEffects(wk.setups[did], wk.opt[did], t) : { topSpeed: 0, mistakeMult: 1 };
-  const lt = t.baseLap - (knowOf(state, did) - AI_KNOW) * 0.3 + perf + (100 - d.pace) * 0.035 + (1 - sq) * 0.9 - (wk.qualiPrep[did] || 0) + wetPenalty(tyre, wet) + wet * 6 + wet * (100 - d.wet) * 0.04 - fx.topSpeed * t.drag * 2 + 0.16 - 0.45 + (COMPOUNDS[tyre]?.off || 0);
+  const lt = t.baseLap - (knowOf(state, did) - AI_KNOW) * 0.3 + perf + (100 - d.pace) * 0.035 + (1 - sq) * 0.9 - (wk.qualiPrep[did] || 0) + wetPenalty(tyre, wet) + wet * 6 + wet * (100 - d.wet) * 0.04 - fx.topSpeed * t.drag * 2 + 0.16 - 0.45;
   return { lt, sq, fx };
 }
 
@@ -31,19 +32,21 @@ export function createSession(state, kind) {
   const rng = new RNG((wk.seed + (kind === 'quali' ? 9001 : 5003) * (idx + 1)) >>> 0);
   const wet = kind === 'quali' ? clamp(wk.qWet + rng.normal(0, 0.05) * (wk.qWet > 0 ? 1 : 0), 0, 1) : clamp((wk.days?.[0]?.wet ?? wk.weather.wet[0] * 0.7) + (wk.days?.[0]?.wet ? rng.normal(0, 0.06) : 0), 0, 1);
   const dryTyre = wet > 0.6 ? 'W' : wet > 0.16 ? 'I' : 'S';
-  const sess = { kind, idx, len: kind === 'quali' ? Q_LEN[idx] : FP_LEN, clock: 0, wet, flag: false, done: false, rngState: rng.s ?? null, seed: rng.next() * 1e9 >>> 0, cars: [], log: [], bestS: [1e9, 1e9, 1e9], best: 1e9, lapNo: 0 };
+  const day = wk.days?.[kind === 'quali' ? 1 : 0];
+  if (kind === 'quali') wk.parcFerme = true; // setup frozen from the start of qualifying until the race (parc fermé)
+  const sess = { kind, idx, trackTemp: day?.track ?? wk.weather.trackTemp, air: day?.air ?? wk.weather.airTemp, wind: day?.wind ?? 10, len: kind === 'quali' ? Q_LEN[idx] : FP_LEN, clock: 0, wet, flag: false, done: false, rngState: rng.s ?? null, seed: rng.next() * 1e9 >>> 0, cars: [], log: [], bestS: [1e9, 1e9, 1e9], best: 1e9, lapNo: 0 };
   for (const team of Object.values(state.teams)) {
     team.drivers.forEach((did) => {
       if (kind === 'quali' && wk.quali.eliminated.includes(did)) return;
       const d = state.drivers[did];
       const plan = kind === 'quali' ? (wk.quali.plans?.[did] || {}) : {};
-      const tyre = team.isPlayer ? (plan.tyre && (wet > 0.16) === !!COMPOUNDS[plan.tyre].wet ? plan.tyre : dryTyre) : (kind === 'practice' && wet < 0.16 ? rng.pick(['S', 'M', 'M', 'H']) : dryTyre);
+      const tyre = team.isPlayer ? (plan.tyre && (wet > 0.16) === !!COMPOUNDS[plan.tyre].wet ? plan.tyre : (wk.qualiTyre && kind === 'quali' && (wet > 0.16) === !!COMPOUNDS[wk.qualiTyre].wet ? wk.qualiTyre : dryTyre)) : (kind === 'practice' && wet < 0.16 ? rng.pick(['S', 'M', 'M', 'H']) : dryTyre);
       sess.cars.push({
         did, teamId: team.id, isPlayer: !!team.isPlayer, color: team.color, short: d.name.split(' ').slice(-1)[0], name: d.name,
         st: 'garage', until: team.isPlayer ? 1e9 : rng.range(15, sess.len * (kind === 'quali' ? 0.45 : 0.3)),
         lapStart: 0, lapLen: t.baseLap, kind: 'out', tyre, push: plan.push || (team.aiStyle === 'aggressive' ? 'max' : 'normal'),
         prog: 'setup', plannedPush: kind === 'quali' ? 2 : 6, pushLeft: 0, boxReq: false, runs: 0, runPush: 0,
-        laps: [], best: 1e9, bestS: [1e9, 1e9, 1e9], lastS: [null, null, null], sColor: ['', '', ''], cur: null, deleted: 0,
+        newSet: kind === 'quali', setId: null, aiWear: 0, laps: [], best: 1e9, bestS: [1e9, 1e9, 1e9], lastS: [null, null, null], sColor: ['', '', ''], cur: null, deleted: 0,
       });
     });
   }
@@ -51,6 +54,19 @@ export function createSession(state, kind) {
   return sess;
 }
 
+// Tyre sets: pick a new set, or the most-used set of that compound that still has grip
+export function pickSet(state, did, c, wantNew) {
+  const sets = (state.weekend.sets?.[did] || []).filter((x) => x.c === c); if (!sets.length) return null;
+  const fresh = sets.filter((x) => x.laps === 0); const used = sets.filter((x) => x.laps > 0 && x.wear < 70).sort((a, b) => b.wear - a.wear);
+  return wantNew ? (fresh[0] || used[used.length - 1] || sets[0]) : (used[0] || fresh[0] || sets.sort((a, b) => a.wear - b.wear)[0]);
+}
+function setOf(state, c) { return c.setId ? state.weekend.sets?.[c.did]?.find((x) => x.id === c.setId) : null; }
+export function setGrip(state, c) { const set = setOf(state, c); return Math.round(100 - (set ? set.wear : c.aiWear || 0)); }
+export function setLaps(state, c) { const set = setOf(state, c); return set ? set.laps : c.aiLaps || 0; }
+export function setsSummary(state, did) {
+  const out = {}; for (const x of state.weekend.sets?.[did] || []) { const o = (out[x.c] ||= { total: 0, fresh: 0, used: [] }); o.total++; if (x.laps === 0) o.fresh++; else o.used.push(x); }
+  return out;
+}
 const rngOf = (sess) => { const r = new RNG((sess.seed + sess.lapNo * 2654435761) >>> 0); sess.lapNo++; return r; };
 
 function startLap(state, sess, c, kind) {
@@ -59,7 +75,8 @@ function startLap(state, sess, c, kind) {
   const { lt, fx } = carBase(state, c.did, sess.wet, c.tyre);
   const evo = t.evo * 0.55 * (sess.clock / sess.len) + (sess.kind === 'quali' ? sess.idx * t.evo * 0.12 : 0);
   const fuel = sess.kind === 'practice' ? (c.prog === 'longrun' ? 1.6 : c.prog === 'qualisim' ? 0.1 : 0.8) : 0;
-  const tyreAge = sess.kind === 'practice' ? Math.max(0, c.runPush - 1) * (COMPOUNDS[c.tyre].wear * 0.02) : c.runPush > 1 ? 0.18 : 0;
+  const set = setOf(state, c); const wearNow = set ? set.wear : c.aiWear;
+  const tyreAge = tyrePaceLoss({ c: c.tyre, wear: wearNow, age: set ? set.laps : c.runPush + 1 }, sess.trackTemp) + (kind === 'push' && wearNow < 3 && sess.kind === 'quali' ? -0.12 : 0);
   const pushK = sess.kind === 'quali' ? { safe: 0.08, normal: 0, max: -0.12 }[c.push] : 0.25;
   let time = lt - evo + fuel + tyreAge + pushK + rng.normal(0, 0.06 + (100 - d.cons) * 0.005);
   const notes = [];
@@ -69,6 +86,11 @@ function startLap(state, sess, c, kind) {
     const mP = { safe: 0.03, normal: 0.06, max: 0.13 }[c.push] * (1 + sess.wet) * (1 + (100 - d.cons) / 60) * (fx.mistakeMult || 1);
     if (rng.chance(mP)) { time += rng.range(0.5, 2); notes.push('mistake'); }
     if (rng.chance(0.03 + (c.push === 'max' ? 0.03 : 0) + t.kerb * 0.02)) notes.push('deleted');
+    // Slipstream / dirty air: a car 1–3% of a lap ahead gives a tow on the straights; closer than that = dirty air in corners
+    const prof = lapProf(t); const ft = prof.fullThrottle || 0.6;
+    const gaps = sess.cars.filter((o) => o !== c && o.st === 'track').map((o) => ((sess.clock - o.lapStart) / o.lapLen));
+    if (gaps.some((g) => g > 0.008 && g < 0.03) && rng.chance(0.4)) { time -= ft * rng.range(0.12, 0.35) * (0.6 + t.drag * 0.6); notes.push('tow'); }
+    else if (gaps.some((g) => g >= 0 && g <= 0.008) && rng.chance(0.5)) { time += (1 - ft) * t.df * rng.range(0.15, 0.4); notes.push('dirty air'); }
   }
   // reliability: a failure can strike mid-lap (ERS/battery, engine, hydraulics, gearbox)
   const team = state.teams[c.teamId]; const car = effectiveCar(team, team.drivers.indexOf(c.did));
@@ -99,6 +121,11 @@ function finishLap(state, sess, c, lines) {
   }
   if (c.isPlayer && sess.kind === 'practice') gainKnow(state, c.did, cur.kind === 'push' ? 1 : 0.4);
   if (c.isPlayer && sess.kind === 'quali') gainKnow(state, c.did, 0.3);
+  { const set = setOf(state, c); const team = state.teams[c.teamId]; const d = state.drivers[c.did];
+    const w = wearPerLap({ c: c.tyre, track: t, car: effectiveCar(team, team.drivers.indexOf(c.did)), driver: d, mode: cur.kind === 'push' ? 'push' : 'conserve', wetness: sess.wet, trackTemp: sess.trackTemp, scale: 1 });
+    if (set) { set.wear = Math.min(100, set.wear + w); set.laps++; } else { c.aiWear = Math.min(100, c.aiWear + w); c.aiLaps = (c.aiLaps || 0) + 1; }
+    if (c.isPlayer && cur.kind === 'push') (state.weekend.runLog[c.did] ||= []).push({ s: `${sess.kind === 'quali' ? ['Q1', 'Q2', 'Q3'][sess.idx] : 'FP' + (sess.idx + 1)}`, run: c.runs + 1, c: c.tyre, set: set?.id, grip: Math.round(100 - (set ? set.wear : 0)), time: +cur.time.toFixed(3), del: cur.notes.includes('deleted'), notes: cur.notes.filter((n) => n !== 'deleted'), wet: +sess.wet.toFixed(2), temp: sess.trackTemp, wind: sess.wind, prog: sess.kind === 'practice' ? c.prog : 'quali', fuel: sess.kind === 'practice' ? (c.prog === 'longrun' ? 'high' : c.prog === 'qualisim' ? 'low' : 'medium') : 'low', setup: { ...state.weekend.setups[c.did] } });
+  }
   if (cur.kind === 'push') {
     c.runPush++; c.pushLeft--;
     const deleted = cur.notes.includes('deleted');
@@ -155,7 +182,7 @@ export function setCarOpt(state, did, patch) {
 }
 // Called by the UI after a setup change: garage time penalty.
 export function setupChanged(state, did) {
-  const sess = state.weekend.live; const c = sess?.cars.find((x) => x.did === did); if (!c || c.st !== 'garage') return false;
+  const sess = state.weekend.live; if (sess?.kind === 'quali') return false; const c = sess?.cars.find((x) => x.did === did); if (!c || c.st !== 'garage') return false;
   c.until = Math.max(c.until === 1e9 ? sess.clock : c.until, sess.clock) + SETUP_CHANGE_S; c.go = false; c.busyUntil = c.until;
   return true;
 }
@@ -174,6 +201,7 @@ export function advanceSession(state, target) {
         if (ready) {
           c.go = false; c.pushLeft = c.isPlayer ? c.plannedPush : sess.kind === 'quali' ? (rngOf(sess).chance(0.35) ? 2 : 1) : Math.round(rngOf(sess).range(3, 9));
           if (!c.isPlayer && sess.kind === 'practice') c.prog = 'setup';
+          if (c.isPlayer) c.setId = pickSet(state, c.did, c.tyre, c.newSet)?.id || null; else { c.aiWear = sess.kind === 'quali' || rngOf(sess).chance(0.5) ? 0 : 15; c.aiLaps = c.aiWear ? 3 : 0; }
           startLap(state, sess, c, 'out');
         }
       } else if (c.st === 'garage' && sess.flag) c.st = 'done';
@@ -208,7 +236,7 @@ export function commitSession(state) {
   if (!sess.done) simulateRest(state);
   if (sess.kind === 'quali') {
     const t = trackById(wk.trackId);
-    const out = ranking(sess).map((c) => ({ did: c.did, teamId: c.teamId, time: (c.best < 1e8) ? c.best : t.baseLap + 4 + c.did.length * 0.001, notes: [...new Set(c.laps.flatMap((l) => l.notes))].map((n) => n === 'deleted' ? 'lap deleted for track limits' : n === 'traffic' ? 'caught in traffic' : 'mistake on push lap') }));
+    const out = ranking(sess).map((c) => ({ did: c.did, teamId: c.teamId, time: (c.best < 1e8) ? c.best : t.baseLap + 4 + c.did.length * 0.001, notes: [...new Set(c.laps.flatMap((l) => l.notes))].map((n) => n === 'deleted' ? 'lap deleted for track limits' : n === 'traffic' ? 'caught in traffic' : n === 'tow' ? 'got a tow' : n === 'dirty air' ? 'lost time in dirty air' : 'mistake on push lap') }));
     commitQuali(state, out, sess.wet);
   } else {
     wk.practice.done++;

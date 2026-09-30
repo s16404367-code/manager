@@ -1,7 +1,7 @@
 // Live practice / qualifying view: animated map, telemetry, timing tower with sector colours, garage controls.
 import { updateSettings, app, on, esc, persist, render, toast, confirmBox } from './app.js';
 import { trackById, trackPoints } from '../data/tracks.js';
-import { advanceSession, simulateRest, commitSession, sendOut, boxThisLap, setCarOpt, ranking, fmt, PRACTICE_PROGRAMS } from '../engines/sessionEngine.js';
+import { advanceSession, simulateRest, commitSession, sendOut, boxThisLap, setCarOpt, ranking, fmt, PRACTICE_PROGRAMS, setsSummary, setGrip, setLaps } from '../engines/sessionEngine.js';
 import { COMPOUNDS } from '../engines/tyreEngine.js';
 import { wetLabel } from '../engines/weatherEngine.js';
 import { mapSvg, carDots, placeCar, placeCarAt, pitPoint, showFlag, teleHtml, updateTele, sectorLegend, lapProfile, sampleAt } from './trackView.js';
@@ -55,7 +55,7 @@ export function startLive() {
       if (c.st === 'track') { const g = document.getElementById('m_' + c.did); if (g) g.style.opacity = 1; }
       if (c.did === selA || c.did === selB) {
         const id = c.did === selA ? 'ltele' : 'ltele2';
-        if (tele) updateTele(t, id, teleWho(c), tele.f, { k: c.kind === 'push' ? 1 : c.kind === 'out' ? 1.35 : 1.25, drs: c.kind === 'push' && sess.kind === 'practice', state: tele.state });
+        if (tele) updateTele(t, id, teleWho(c), tele.f, { k: c.kind === 'push' ? 1 : c.kind === 'out' ? 1.35 : 1.25, drs: c.kind === 'push' && sess.kind === 'practice', state: tele.state, follow: c.kind === 'push' && (c.cur?.notes || []).some((n) => n === 'tow' || n === 'dirty air') });
         else updateTele(t, id, teleWho(c), 0, { state: 'garage' });
       }
     });
@@ -94,7 +94,7 @@ function drawLiveUI(sess) {
     if (v != null) cls = v <= sess.bestS[i] + 1e-6 ? 'purple' : v <= c.bestS[i] + 1e-6 ? 'pb' : 'yl';
     return `<td class="mono tiny sc ${cls}">${v != null ? v.toFixed(1) : ''}</td>`; };
   const tw = document.getElementById('ltower');
-  if (tw) tw.innerHTML = `<table><thead><tr><th>#</th><th></th><th>Driver</th><th>Best</th><th>Gap</th><th>S1</th><th>S2</th><th>S3</th><th>Laps</th><th></th></tr></thead><tbody>${rk.map((c, i) => `<tr class="${c.isPlayer ? 'pl' : ''} ${app.tab.lsel === c.did ? 'sel' : ''} ${i === cut ? 'cutline' : ''}" data-tap="liveSel" tabindex="0" data-arg="${c.did}" style="cursor:pointer"><td class="pos">${i + 1}</td><td><span class="sw" style="background:${c.color}"></span></td><td class="nm">${esc(c.short)}</td><td class="mono small ${(c.best < 1e8) && c.best === best ? 'purple' : ''}">${(c.best < 1e8) ? fmt(c.best) : '—'}</td><td class="mono tiny muted">${i && (c.best < 1e8) ? '+' + (c.best - best).toFixed(3) : ''}</td>${[0, 1, 2].map((k) => sCell(c, k)).join('')}<td class="tiny muted">${c.laps.length}</td><td class="tiny">${c.st === 'track' ? (c.kind === 'push' ? '<span class="good">●</span>' : '<span class="muted">○</span>') : c.st === 'garage' ? '<span class="muted">PIT</span>' : ''}${i >= cut ? ' <span class="bad">DZ</span>' : ''}</td></tr>`).join('')}</tbody></table>`;
+  if (tw) tw.innerHTML = `<table><thead><tr><th>#</th><th></th><th>Driver</th><th>Best</th><th>Gap</th><th>S1</th><th>S2</th><th>S3</th><th>Tyre</th><th>Laps</th><th></th></tr></thead><tbody>${rk.map((c, i) => `<tr class="${c.isPlayer ? 'pl' : ''} ${app.tab.lsel === c.did ? 'sel' : ''} ${i === cut ? 'cutline' : ''}" data-tap="liveSel" tabindex="0" data-arg="${c.did}" style="cursor:pointer"><td class="pos">${i + 1}</td><td><span class="sw" style="background:${c.color}"></span></td><td class="nm">${esc(c.short)}</td><td class="mono small ${(c.best < 1e8) && c.best === best ? 'purple' : ''}">${(c.best < 1e8) ? fmt(c.best) : '—'}</td><td class="mono tiny muted">${i && (c.best < 1e8) ? '+' + (c.best - best).toFixed(3) : ''}</td>${[0, 1, 2].map((k) => sCell(c, k)).join('')}<td class="tiny">${tyreBadge(c.tyre)}<span class="muted"> ${setLaps(app.state, c)}L·${setGrip(app.state, c)}%</span></td><td class="tiny muted">${c.laps.length}</td><td class="tiny">${c.st === 'track' ? (c.kind === 'push' ? '<span class="good">●</span>' : '<span class="muted">○</span>') : c.st === 'garage' ? '<span class="muted">PIT</span>' : ''}${i >= cut ? ' <span class="bad">DZ</span>' : ''}</td></tr>`).join('')}</tbody></table>`;
   // controls
   const ctrl = document.getElementById('lctrl');
   const html = sess.cars.filter((c) => c.isPlayer).map((c) => carCtrl(sess, c)).join('') + `<div class="card tight tiny muted">Cars leave the garage on an out-lap, run the requested flying laps, then return. ${sess.kind === 'quali' ? 'Rubber builds up — later laps are faster, but traffic and track-limits deletions are real. A lap started before the flag counts.' : 'Programme learning is applied each time the car returns to the garage.'} Space = pause.</div>`;
@@ -106,11 +106,16 @@ function drawLiveUI(sess) {
 function carCtrl(sess, c) {
   const garage = c.st === 'garage'; const busy = garage && (c.busyUntil || 0) > sess.clock;
   const status = c.st === 'track' ? `${KIND[c.kind]}${c.boxReq ? ' · <b class="warn">boxing this lap</b>' : c.kind === 'push' || c.kind === 'cool' ? ` · ${c.pushLeft} flying lap(s) left` : ''}` : c.st === 'done' ? 'Session complete' : busy ? `${c.fails ? '🔧 Repairing failure' : 'Mechanics working'} (${clockTxt(c.busyUntil - sess.clock)})${c.busyUntil > sess.len ? ' — will miss the rest of the session' : ''}` : c.go ? 'Leaving garage…' : 'In the garage';
-  const tyres = sess.wet > 0.16 ? ['I', 'W'] : ['S', 'M', 'H'];
+  const tyres = ['S', 'M', 'H', 'I', 'W'];
+  const rk = ranking(sess); const pos = rk.indexOf(c) + 1; const lastT = c.laps.length ? c.laps[c.laps.length - 1].tyre : null;
+  const sum = setsSummary(app.state, c.did);
+  const inv = Object.entries(sum).map(([k, o]) => `<span class="pill" title="${o.used.map((u) => u.id + ': ' + Math.round(100 - u.wear) + '% grip, ' + u.laps + ' laps').join('\n')}">${tyreBadge(k)} ${o.fresh} new${o.used.length ? ' · ' + o.used.map((u) => Math.round(100 - u.wear) + '%').join('/') : ''}</span>`).join(' ');
   const lapsOpts = sess.kind === 'quali' ? [1, 2, 3] : [3, 6, 10];
-  return `<div class="carpanel"><div class="hd"><span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b><span class="pill">${(c.best < 1e8) ? fmt(c.best) : 'no time'}</span><span class="sp"></span><span class="tiny muted">${c.laps.length} laps${c.deleted ? ` · ${c.deleted} deleted` : ''}</span></div>
+  return `<div class="carpanel"><div class="hd"><span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b><span class="pill">P${pos}</span><span class="pill">${(c.best < 1e8) ? fmt(c.best) : 'no time'}</span><span class="sp"></span><span class="tiny muted">${c.laps.length} laps${c.deleted ? ` · ${c.deleted} deleted` : ''}</span></div>
   <div class="small" style="margin:.2rem 0 .4rem">${status}</div>
-  <div class="tiny muted">Tyre ${garage ? '' : '(change in garage)'}</div><div class="seg">${tyres.map((x) => `<button class="btn sm ${c.tyre === x ? 'on' : ''}" data-act="liveTyre" data-arg="${c.did}:${x}" ${garage ? '' : 'disabled'} title="${COMPOUNDS[x].name}">${tyreBadge(x)}</button>`).join('')}</div>
+  <div class="tiny" style="margin-bottom:.3rem">On car: ${tyreBadge(c.tyre)} grip ${setGrip(app.state, c)}%${lastT ? ` · last timed lap on ${tyreBadge(lastT)}` : ''}</div>
+  <div class="tiny muted">Tyre ${garage ? '' : '(change in garage)'}</div><div class="seg">${tyres.map((x) => `<button class="btn sm ${c.tyre === x ? 'on' : ''}" data-act="liveTyre" data-arg="${c.did}:${x}" ${garage ? '' : 'disabled'} title="${COMPOUNDS[x].name}">${tyreBadge(x)}</button>`).join('')}<span class="sp"></span><button class="btn sm ${c.newSet ? 'on' : ''}" data-act="liveSet" data-arg="${c.did}:1" ${garage ? '' : 'disabled'}>New set</button><button class="btn sm ${!c.newSet ? 'on' : ''}" data-act="liveSet" data-arg="${c.did}:0" ${garage ? '' : 'disabled'}>Used set</button></div>
+  <div class="tiny muted" style="margin:.15rem 0 .3rem">Sets: ${inv || '—'}</div>
   ${sess.kind === 'practice' ? `<div class="tiny muted">Programme</div><div class="seg wrap">${Object.entries(PRACTICE_PROGRAMS).map(([k, p]) => `<button class="btn sm ${c.prog === k ? 'on' : ''}" data-act="liveProg" data-arg="${c.did}:${k}" title="${esc(p.desc)}" ${garage ? '' : 'disabled'}>${p.label}</button>`).join('')}</div>` : `<div class="tiny muted">Push level</div><div class="seg">${[['safe', 'Safe'], ['normal', 'Normal'], ['max', 'Maximum']].map(([k, l]) => `<button class="btn sm ${c.push === k ? 'on' : ''}" data-act="livePush" data-arg="${c.did}:${k}">${l}</button>`).join('')}</div>`}
   <div class="tiny muted">Flying laps per run</div><div class="seg">${lapsOpts.map((n) => `<button class="btn sm ${c.plannedPush === n ? 'on' : ''}" data-act="liveLaps" data-arg="${c.did}:${n}">${n}</button>`).join('')}</div>
   <div class="row" style="margin-top:.5rem">${garage && !sess.flag ? `<button class="btn primary sm" data-act="liveOut" data-arg="${c.did}" ${c.go ? 'disabled' : ''}>▶ Send out</button>` : ''}${c.st === 'track' && c.kind !== 'in' ? `<button class="btn sm danger" data-act="liveBox" data-arg="${c.did}" ${c.boxReq ? 'disabled' : ''}>Box this lap</button>` : ''}</div></div>`;
@@ -123,6 +128,7 @@ on({
   liveOut: (did) => { if (sendOut(app.state, did)) toast('Car released from the garage.', 'info', 1400); drawLiveUI(L()); },
   liveBox: (did) => { boxThisLap(app.state, did); drawLiveUI(L()); },
   liveTyre: (arg) => { const [did, x] = arg.split(':'); setCarOpt(app.state, did, { tyre: x }); drawLiveUI(L()); },
+  liveSet: (arg) => { const [did, x] = arg.split(':'); setCarOpt(app.state, did, { newSet: x === '1' }); drawLiveUI(L()); },
   liveProg: (arg) => { const [did, x] = arg.split(':'); setCarOpt(app.state, did, { prog: x }); drawLiveUI(L()); },
   livePush: (arg) => { const [did, x] = arg.split(':'); setCarOpt(app.state, did, { push: x }); drawLiveUI(L()); },
   liveLaps: (arg) => { const [did, n] = arg.split(':'); setCarOpt(app.state, did, { plannedPush: +n }); drawLiveUI(L()); },

@@ -57,6 +57,7 @@ export function lapProfile(track, carAdj = null) {
   // braking/throttle states
   prof.phase = prof.v.map((x, i) => { const n = prof.v[(i + 1) % N]; return n < x - 0.4 ? 'brake' : x >= prof.vmax[i] - 0.5 && prof.vmax[i] < vTop * k - 1 ? 'corner' : 'throttle'; });
   // sector boundaries at 1/3 and 2/3 distance
+  prof.fullThrottle = prof.phase.reduce((a, ph, i) => a + (ph === 'throttle' ? dt[i] : 0), 0) / total;
   prof.sectorTf = [tf[Math.floor(N / 3)], tf[Math.floor((2 * N) / 3)]];
   cache[key] = prof; return prof;
 }
@@ -71,3 +72,27 @@ export function sampleAt(prof, f) {
   return { d, v, i, gear: Math.max(1, Math.min(8, Math.ceil(v / 42))), throttle: ph === 'brake' ? 0 : ph === 'corner' ? 55 : 100, brake: ph === 'brake' ? 100 : 0 };
 }
 export const kmLen = (t) => (shapeOf(t).len / 1000).toFixed(3);
+
+// ---- Climate (typical daytime highs, °C, January / July) — from long-term climate normals (approximate) ----
+// night: race held at night/twilight (cooler air). Used with the month a race is held in.
+export const CLIMATE = {
+  trk_melbourne: [26, 14], trk_shanghai: [8, 32], trk_suzuka: [10, 31], trk_bahrain: [20, 38, 1], trk_jeddah: [29, 39, 1],
+  trk_miami: [24, 33], trk_montreal: [-5, 26], trk_monaco: [13, 26], trk_barcelona: [14, 28], trk_spielberg: [0, 24],
+  trk_silverstone: [7, 22], trk_spa: [4, 21], trk_hungaroring: [2, 28], trk_zandvoort: [6, 21], trk_monza: [6, 30],
+  trk_madrid: [10, 33], trk_baku: [7, 31], trk_singapore: [30, 31, 1], trk_austin: [17, 35], trk_mexico: [21, 24],
+  trk_interlagos: [28, 22], trk_vegas: [14, 40, 1], trk_lusail: [22, 41, 1], trk_yasmarina: [24, 41, 1],
+};
+// Month of each round on the real 2026 calendar (index = calendar order)
+export const MONTH_2026 = [3, 3, 3, 4, 4, 5, 5, 6, 6, 6, 7, 7, 7, 8, 9, 9, 9, 10, 10, 11, 11, 11, 11, 12];
+export const MONTH_NAME = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export function climateAir(track, month) {
+  const [jan, jul, night] = CLIMATE[track.id] || [18, 26];
+  const t = (jan + jul) / 2 + ((jan - jul) / 2) * Math.cos((2 * Math.PI * (month - 1)) / 12);
+  return t - (night ? 5 : 0);
+}
+// Month for a given round: real calendar -> real month; custom/random order -> spread March..December
+export function monthFor(state, round) {
+  const id = state.calendar[round]; const idx = TRACKS.findIndex((t) => t.id === id);
+  if (state.calendarOrder !== 'random' && idx >= 0) return MONTH_2026[idx];
+  const n = state.calendar.length; return Math.min(12, 3 + Math.floor((round / Math.max(1, n)) * 10));
+}

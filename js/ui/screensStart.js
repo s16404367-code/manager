@@ -34,7 +34,7 @@ on({
 });
 
 // ---------------- New Career ----------------
-const draft = () => (app.draft.career ||= { name: 'Meridian Racing', abbr: 'MER', color: '#e10600', color2: '#ffffff', profile: 'midfield', philosophy: 'balanced', difficulty: 'standard', seasonLength: 12, raceLength: 0.35, control: 'hands-on', ironman: false, drivers: [] });
+const draft = () => (app.draft.career ||= { name: 'Meridian Racing', abbr: 'MER', color: '#e10600', color2: '#ffffff', profile: 'midfield', philosophy: 'balanced', difficulty: 'standard', seasonLength: 12, calendarOrder: 'real', raceLength: 0.35, control: 'hands-on', ironman: false, drivers: [] });
 function availableDrivers(profile) {
   const reversed = [...TEAMS].reverse(); const replaced = reversed.find((t) => t.tier === profile);
   return { replaced, list: DRIVERS.filter((d) => d.team === replaced.id || d.team === null || d.team === 'academy') };
@@ -57,6 +57,7 @@ screen('newcareer', {
         <div class="grid g2" style="gap:.6rem">
           <div><label>Difficulty</label><select data-change="cdraft" data-arg="difficulty">${Object.entries(DIFFICULTY).map(([k, v]) => `<option value="${k}" ${d.difficulty === k ? 'selected' : ''}>${v.label}</option>`).join('')}</select><div class="tiny muted">${DIFFICULTY[d.difficulty].desc}</div></div>
           <div><label>Season length</label><select data-change="cdraft" data-arg="seasonLength">${[8, 12, 16, 24].map((n) => `<option value="${n}" ${d.seasonLength == n ? 'selected' : ''}>${n === 24 ? '24 races (full 2026 calendar)' : n + ' races'}</option>`).join('')}</select></div>
+          <div><label>Venue order</label><select data-change="cdraft" data-arg="calendarOrder"><option value="real" ${d.calendarOrder !== 'random' ? 'selected' : ''}>Real 2026 order (climate follows the months)</option><option value="random" ${d.calendarOrder === 'random' ? 'selected' : ''}>Random order (reshuffled each season)</option></select></div>
           <div><label>Race distance</label><select data-change="cdraft" data-arg="raceLength">${[[0.25, '25% (~5 min)'], [0.35, '35% (~8 min)'], [0.5, '50% (~12 min)'], [1, '100% (full)']].map(([v, l]) => `<option value="${v}" ${d.raceLength == v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
           <div><label>Control level</label><select data-change="cdraft" data-arg="control"><option value="principal" ${d.control === 'principal' ? 'selected' : ''}>Principal (delegate details)</option><option value="hands-on" ${d.control === 'hands-on' ? 'selected' : ''}>Hands-on Principal</option></select></div>
         </div>
@@ -84,7 +85,7 @@ on({
     const P = PROFILES[d.profile];
     const ok = await modal(`<h2>Board objective</h2><p>The board of <b>${esc(d.name)}</b> expects a <b>P${P.target} or better</b> finish in the Constructors' Championship, positive cash at season end, and a reliable car.</p><p class="muted small">Board patience: ${P.boardPatience >= 1.2 ? 'high' : P.boardPatience >= 0.9 ? 'normal' : 'low'}. Falling below ~10% confidence ends your tenure.</p><div class="row" style="justify-content:flex-end"><button class="btn" data-act="modalClose">Back</button><button class="btn primary" data-act="modalOk">Accept & go to HQ</button></div>`);
     if (!ok) return;
-    const s = createWorld({ mode: 'career', difficulty: d.difficulty, seasonLength: d.seasonLength, raceLength: d.raceLength, ironman: d.ironman, controlLevel: d.control, custom: { name: d.name.trim() || 'My Team', abbr: (d.abbr || 'TEA').toUpperCase().slice(0, 3), color: d.color, color2: d.color2, profile: d.profile, philosophy: d.philosophy, driverIds: d.drivers } });
+    const s = createWorld({ mode: 'career', difficulty: d.difficulty, seasonLength: d.seasonLength, calendarOrder: d.calendarOrder || 'real', raceLength: d.raceLength, ironman: d.ironman, controlLevel: d.control, custom: { name: d.name.trim() || 'My Team', abbr: (d.abbr || 'TEA').toUpperCase().slice(0, 3), color: d.color, color2: d.color2, profile: d.profile, philosophy: d.philosophy, driverIds: d.drivers } });
     setState(s); persist(); app.draft.career = null; app.tutorial = app.settings.showTutorial; go('hq');
   },
 });

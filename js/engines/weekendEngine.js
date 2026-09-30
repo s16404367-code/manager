@@ -1,12 +1,12 @@
 // Race weekend orchestration: preparation, practice, qualifying, strategy, race creation, classification.
 import { RNG, hashStr } from '../sim/rng.js';
 import { clamp, avg } from '../sim/util.js';
-import { trackById } from '../data/tracks.js';
+import { trackById, monthFor, climateAir, lapProfile } from '../data/tracks.js';
 import { PERSONALITIES } from '../data/drivers.js';
 import { effectiveCar, trackScore, carDeficitSec, setupOptimum, setupQuality, setupEffects, defaultSetup, SETUP_KEYS, SETUP_LABEL, AI_FX } from './carModel.js';
 import { generateWeather, forecast } from './weatherEngine.js';
 import { planOptions, labelPlans, clonePlan } from './strategyEngine.js';
-import { wearPerLap, COMPOUNDS, wetPenalty } from './tyreEngine.js';
+import { wearPerLap, COMPOUNDS, wetPenalty, ALLOCATION, tyrePaceLoss } from './tyreEngine.js';
 import { createRace } from './raceEngine.js';
 import { maxWear, ensurePC } from './components.js';
 import { deptQ, facLvl, pitCrew, forecastAccuracy, DIFFICULTY, teamDrivers, POINTS } from './world.js';
@@ -19,6 +19,9 @@ export function startWeekend(state) {
   const laps = Math.max(8, Math.round(t.laps * state.raceLength));
   const scale = clamp(t.laps / laps, 1, 4);
   const weather = generateWeather(t, laps, rng, state.forceWeather ?? null);
+  // Climate: temperatures follow the venue's typical weather for the month the race is held in (random day-to-day spread)
+  const month = monthFor(state, state.round); const airMean = climateAir(t, month);
+  weather.airTemp = Math.round(airMean + rng.normal(0, 3)); weather.trackTemp = Math.round(weather.airTemp + rng.range(6, 18) * (weather.wet[0] > 0.15 ? 0.35 : 1));
   const qWet = rng.chance(t.wx * 0.3) ? rng.range(0.15, 0.8) : 0;
   const pt = state.teams[state.player];
   const diff = DIFFICULTY[state.difficulty];
@@ -45,7 +48,7 @@ export function startWeekend(state) {
   }
   // Race-day tyre behaviour can differ from Friday: temperature swing, track rubbering, wind, rain washing rubber away.
   // Three different days: Friday (practice), Saturday (qualifying), Sunday (race)
-  const dayT = (d) => Math.round(weather.airTemp + rng.normal(0, 2.5) + d);
+  const dayT = (d) => Math.round(airMean + rng.normal(0, 3) + d);
   const fpWet = rng.chance(t.wx * 0.3) ? rng.range(0.15, 0.75) : 0;
   const friAir = dayT(-1), satAir = dayT(0);
   wk.days = [
@@ -56,14 +59,37 @@ export function startWeekend(state) {
   const rainy = weather.wet.some((w) => w > 0.12);
   wk.raceDeg = clamp(1 + rng.normal(0, 0.11) + (weather.trackTemp - wk.days[0].track) * 0.006 + (weather.trackTemp - 35) * 0.002 + (rainy ? rng.range(-0.08, 0.1) : 0), 0.78, 1.3);
   for (const did of pt.drivers) { wk.know[did] = clamp(0.25 + facLvl(pt, 'simulator') * 0.05 + (state.drivers[did].age > 27 ? 0.1 : 0), 0, 0.6); ensurePC(pt); }
+  wk.month = month;
+  // Tyre sets (real-life style allocation) and run log for the player's drivers
+  wk.sets = {}; wk.runLog = {}; wk.condKnow = {}; wk.condBias = {};
+  const condSpread = clamp(wk.days[0].wind / 30 + Math.abs(wk.days[2].track - wk.days[0].track) / 12 + (Math.abs(wk.days[0].wet - wk.days[2].wet) > 0.15 ? 0.6 : 0), 0.15, 1.6);
+  wk.condSpread = condSpread;
+  for (const did of pt.drivers) {
+    let n = 0; wk.sets[did] = Object.entries(ALLOCATION).flatMap(([c, k]) => Array.from({ length: k }, () => ({ id: c + (++n), c, wear: 0, laps: 0 })));
+    wk.runLog[did] = []; wk.condKnow[did] = 0;
+    wk.condBias[did] = Object.fromEntries(SETUP_KEYS.map((k) => [k, rng.normal(0, 1) * condSpread]));
+  }
   state.setupPenalty = 0;
   state.weekend = wk;
   return wk;
 }
 
+export function estimateReliability(wk, did) {
+  const k = wk.knowledge[did]; const kk = Object.values(k).reduce((a, b) => a + b, 0) / Object.values(k).length;
+  const cond = (wk.condSpread || 0) * (1 - (wk.condKnow?.[did] || 0));
+  const score = clamp(kk - cond * 0.25, 0, 1);
+  const why = [];
+  if (kk < 0.5) why.push('few laps / limited setup data');
+  if (wk.days?.[0]?.wind > 18) why.push(`gusty wind on Friday (${wk.days[0].wind} km/h)`);
+  if (wk.days && Math.abs(wk.days[2].track - wk.days[0].track) > 5) why.push(`Sunday track ${wk.days[2].track > wk.days[0].track ? 'hotter' : 'cooler'} than Friday (${wk.days[0].track}° → ${wk.days[2].track}°)`);
+  if (wk.days && Math.abs(wk.days[0].wet - wk.days[2].wet) > 0.15) why.push('different weather Friday vs Sunday');
+  if ((wk.condKnow?.[did] || 0) > 0.5) why.push('conditions correlation done ✓');
+  return { score, label: score > 0.75 ? 'Reliable' : score > 0.5 ? 'Fair' : 'Unreliable', why };
+}
 export function engineerEstimate(wk, did) {
   const o = wk.opt[did], n = wk.noise[did], k = wk.knowledge[did];
-  return Object.fromEntries(SETUP_KEYS.map((key) => [key, clamp(Math.round((o[key] + n[key] * (1 - k[key]) * 3.2) * 2) / 2, 0, 10)]));
+  const cb = wk.condBias?.[did]; const ck = wk.condKnow?.[did] || 0;
+  return Object.fromEntries(SETUP_KEYS.map((key) => [key, clamp(Math.round((o[key] + n[key] * (1 - k[key]) * 3.2 + (cb ? cb[key] * (1 - ck) : 0)) * 2) / 2, 0, 10)]));
 }
 
 export const PRACTICE_PROGRAMS = {
@@ -71,6 +97,8 @@ export const PRACTICE_PROGRAMS = {
   longrun: { label: 'Long runs', desc: 'Learn tyre degradation. Better strategy estimates.' },
   qualisim: { label: 'Qualifying simulation', desc: 'Low-fuel runs. Small quali pace gain (~0.05–0.1s).' },
   correlation: { label: 'Aero correlation test', desc: 'Measure newly deployed parts — reveals real gain.' },
+  conditions: { label: 'Aero rake & conditions correlation', desc: 'Sensor rakes + wind/temperature mapping. Removes the bias from wind, temperature and weather changes in the engineers\' estimate.' },
+  tyrecomp: { label: 'Compound comparison', desc: 'Short runs on each compound. Learns how every tyre behaves here (all-compound data for quali & strategy).' },
   reliability: { label: 'Reliability run', desc: 'Burn-in checks: 12% lower failure risk this weekend, adds PU mileage.' },
 };
 
@@ -110,6 +138,8 @@ export function applyProgram(state, did, prog, rng, mult = 1, lines = []) {
       pending.forEach((p) => { p.revealed = true; lines.push({ did, prog, text: `Correlation: ${p.name} measured at ${fmtFx(p.actual)} vs predicted ${fmtFx(p.expected)}.` }); });
       for (const key of SETUP_KEYS) k[key] = clamp(k[key] + 0.05, 0, 0.97);
     }
+    if (prog === 'conditions') { wk.condKnow[did] = clamp((wk.condKnow[did] || 0) + 0.4 * mult, 0, 0.95); lines.push({ did, prog, text: `${d.name}: aero rakes and wind mapping done. Estimate bias from conditions reduced (confidence ${Math.round(wk.condKnow[did] * 100)}%).` }); }
+    if (prog === 'tyrecomp') { wk.tyreKnow = clamp(wk.tyreKnow + 0.2 * mult, 0, 0.95); lines.push({ did, prog, text: `${d.name}: compared compounds back-to-back. Tyre model improved.` }); }
     if (prog === 'reliability') { wk.relBurn[did] = true; lines.push({ did, prog, text: `${d.name} completed reliability checks. ${pt.car.reliability < 65 ? 'Engineers flagged a marginal hydraulic pressure trace.' : 'No issues found.'}` }); }
   return lines;
 }
@@ -164,7 +194,7 @@ export function qualiLap(state, team, slot, did, t, wet, rng, plan) {
 export function aiSetupQ(team, rng) { return clamp(0.78 + deptQ(team, 'vd') * 0.0018 + rng.range(-0.06, 0.06), 0.6, 0.99); }
 
 export function runQualiSession(state, plans) {
-  const wk = state.weekend; const t = trackById(wk.trackId);
+  const wk = state.weekend; const t = trackById(wk.trackId); wk.parcFerme = true;
   const s = wk.quali.session; // 0,1,2
   const rng = new RNG((wk.seed + 777 * (s + 1)) >>> 0);
   const wet = clamp(wk.qWet + rng.normal(0, 0.05) * (wk.qWet > 0 ? 1 : 0), 0, 1);
@@ -246,15 +276,21 @@ export function buildRace(state) {
       if (team.isPlayer && wk.weather.wet[0] > 0.16 && ['S', 'M', 'H'].includes(plan.start) && wk.startTyre?.[did] == null) {/* player chose */}
       if (team.isPlayer && wk.startTyre?.[did]) plan.start = wk.startTyre[did];
       const relFac = team.isPlayer ? relMultiplier(state, team, did) : clamp(1.1 - deptQ(team, 'rel') * 0.004, 0.7, 1.2);
+      let sets = null, startWear = 0;
+      if (team.isPlayer && Array.isArray(wk.sets?.[did])) {
+        sets = wk.sets[did].map((x) => ({ ...x }));
+        const st0 = sets.filter((x) => x.c === plan.start).sort((a, b) => a.wear - b.wear)[0];
+        if (st0) { startWear = st0.wear; sets.splice(sets.indexOf(st0), 1); }
+      } else if (!team.isPlayer && ['S', 'M'].includes(plan.start) && wk.grid.indexOf(did) < 10) startWear = rng.range(4, 12); // top-10 start on quali tyres
       entries.push({
-        driverId: did, teamId: team.id, name: d.name, short: d.name.split(' ').slice(-1)[0], abbr: team.abbr, color: team.color,
+        sets, startWear, driverId: did, teamId: team.id, name: d.name, short: d.name.split(' ').slice(-1)[0], abbr: team.abbr, color: team.color,
         isPlayer: team.isPlayer, slot, grid: wk.grid.indexOf(did) + 1, drv: d, car, perf, setupQ, setupFx, plan,
         know: knowOf(state, did), crew: pitCrew(team), relMult: relFac * (wk.relBurn[did] ? 0.88 : 1), fuelLoad: team.isPlayer ? wk.fuel[did] || 1 : 1, aiStyle: team.aiStyle,
       });
     });
   }
   entries.sort((a, b) => a.grid - b.grid);
-  wk.race = createRace({ track: t, laps: wk.laps, entries, weather: wk.weather, seed: rng.int(1, 2 ** 31), scale: wk.scale, difficulty: state.difficulty, degMult: wk.raceDeg || 1 });
+  wk.race = createRace({ track: t, laps: wk.laps, entries, weather: wk.weather, seed: rng.int(1, 2 ** 31), scale: wk.scale, difficulty: state.difficulty, degMult: wk.raceDeg || 1, fullThrottle: lapProfile(t).fullThrottle });
   wk.phase = 'race';
   return wk.race;
 }

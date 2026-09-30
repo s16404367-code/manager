@@ -71,12 +71,15 @@ export function teleHtml(t, id = 'tele') {
     <div class="row tiny muted"><span>S1</span><span class="sp"></span><span>S2</span><span class="sp"></span><span>S3</span></div></div>`;
 }
 // f = lap time fraction; k = speed multiplier (e.g. out-lap slower); state: 'track'|'pit'|'garage'
-export function updateTele(t, id, who, f, { k = 1, state = 'track', drs = false, cap = null } = {}) {
+export function updateTele(t, id, who, f, { k = 1, state = 'track', drs = false, cap = null, follow = false } = {}) {
   const $ = (x) => document.getElementById(id + '-' + x); if (!$('spd')) return;
-  $('who').innerHTML = who;
+  let tag = '';
+  if (follow && state === 'track' && !cap) { const s0 = sampleAt(lapProfile(t), f); tag = s0.throttle === 100 ? ' <b class="tag-tow">TOW +12 km/h</b>' : ' <b class="tag-dirty">DIRTY AIR −4 km/h</b>'; }
+  if ($('who')._h !== who + tag) { $('who').innerHTML = who + tag; $('who')._h = who + tag; }
   if (state !== 'track') { $('spd').textContent = state === 'pit' ? '80' : '0'; $('gear').textContent = state === 'pit' ? '2' : 'N'; $('thr').style.width = '0%'; $('brk').style.width = '0%'; $('drs').style.width = '0%'; return; }
   const prof = lapProfile(t); const s = sampleAt(prof, f);
-  let v = s.v / k; if (cap) v = Math.min(v, cap - (s.brake ? 45 : 0) + Math.sin(f * 40) * 6);
+  let v = s.v / k; if (follow && !cap) v += s.throttle === 100 ? 12 : -4;
+  if (cap) v = Math.min(v, cap - (s.brake ? 45 : 0) + Math.sin(f * 40) * 6);
   $('spd').textContent = Math.round(v); $('gear').textContent = Math.max(1, Math.min(8, Math.ceil(v / 42)));
   $('thr').style.width = (cap ? (s.brake ? 0 : 35) : k > 1.1 && s.throttle === 100 ? 70 : s.throttle) + '%'; $('brk').style.width = (cap ? s.brake * 0.4 : s.brake) + '%';
   $('drs').style.width = drs && !cap && s.throttle === 100 && s.v > 250 ? '100%' : '0%';

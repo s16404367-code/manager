@@ -3,7 +3,7 @@ import { updateSettings, app, screen, on, go, esc, persist, toast, render, modal
 import { trackById, trackPath } from '../data/tracks.js';
 import { drsOn, advance, actions, carById, updateOrder, MODES, ERS_MODES } from '../engines/raceEngine.js';
 import { classify } from '../engines/weekendEngine.js';
-import { COMPOUNDS } from '../engines/tyreEngine.js';
+import { COMPOUNDS, grip } from '../engines/tyreEngine.js';
 import { wetLabel } from '../engines/weatherEngine.js';
 import { DIFFICULTY, deptQ } from '../engines/world.js';
 import { fmtTime, clamp } from '../sim/util.js';
@@ -27,8 +27,8 @@ screen('race', {
       <div class="card c-tower tower"><div class="row"><h4 style="margin:0">Timing</h4><span class="sp"></span><button class="btn sm ghost" data-act="gapMode" id="gapModeBtn">Interval</button></div><div id="tower"></div></div>
       <div class="c-map"><div class="mapwrap">${mapSvg(t, 'map')}${sectorLegend()}</div>
         <div class="card tight" style="margin-top:.8rem"><h4 style="margin:0 0 .4rem">Telemetry <span class="tiny muted" style="text-transform:none;letter-spacing:0">— tap any car in the timing table (yours or a rival)</span></h4>${teleHtml(t, 'rtele')}</div>
-        <div class="card c-feed" style="margin-top:.8rem"><h4>Team radio & race control</h4><div class="feed" id="feed"></div></div></div>
-      <div class="c-ctrl" id="ctrl"></div>
+</div>
+      <div class="c-side"><div class="c-ctrl" id="ctrl"></div><div class="card c-feed" style="margin-top:.8rem"><h4>Team radio & race control</h4><div class="feed" id="feed"></div></div></div>
     </div>`;
   },
   after() { startLoop(); },
@@ -91,6 +91,7 @@ function recommendation(race, p) {
   if (p.type === 'sc' || p.type === 'vsc') for (const c of mine) { const left = race.laps - c.lapsDone; const next = c.plan.stops[c.planIdx]; if (left > 4 && (c.tyre.wear > 35 || (next && next.lap - c.lapsDone < 10))) recs.push(`Box ${c.short} for ${left > 15 / race.scale ? 'Hards' : 'Mediums'}`); else recs.push(`Keep ${c.short} out (track position)`); }
   if (p.type === 'rain') recs.push(race.wetness > 0.2 ? 'Switch to Intermediates now' : 'Wait one more lap — crossover is close');
   if (p.type === 'dry') recs.push(race.wetness < 0.1 ? 'Switch to slicks now' : 'Hold on inters one more lap');
+  if (p.type === 'red') recs.push('Free tyre change: fit the tyre that can reach the flag (Hards if >25 laps left)');
   if (p.type === 'cliff') recs.push('Box within 1–2 laps or lose ~1s+/lap');
   if (p.type === 'damage') recs.push('Repair if more than ~8 laps remain');
   if (p.type === 'plan') recs.push(Math.abs((race.degMult || 1) - 1) > 0.06 ? 'Adapt the plan: wear differs clearly from Friday' : 'Keep the plan: wear matches the model');
@@ -98,24 +99,30 @@ function recommendation(race, p) {
   return recs.length ? `<div class="alert small"><b>Engineer recommendation</b> (confidence: ${conf}): ${recs.map(esc).join(' · ')}</div>` : '';
 }
 function tyreRow(race, c) {
-  return `<div class="row small" style="margin:.3rem 0"><b style="min-width:90px">${esc(c.short)}</b> P${c.pos} ${tyreBadge(c.tyre.c)} ${Math.round(c.tyre.wear)}%
+  return `<div class="row small" style="margin:.3rem 0"><b style="min-width:90px">${esc(c.short)}</b> P${c.pos} ${tyreBadge(c.tyre.c)} grip ${grip(c.tyre)}%
   <span class="sp"></span>${['S', 'M', 'H', 'I', 'W'].map((x) => `<button class="btn sm ${c.pitReq?.c === x ? 'on' : ''}" data-act="dpit" data-arg="${c.id}:${x}">Box ${x}</button>`).join('')}<button class="btn sm ${!c.pitReq ? 'on' : ''}" data-act="dstay" data-arg="${c.id}">Stay out</button></div>`;
+}
+export function raceDataHtml(race) {
+  const order = updateOrder(race); const w = race.weather?.wet || [];
+  const trend = [0, 3, 6, 10].map((k) => { const l = Math.min(w.length - 1, race.lap + k); return `<span class="pill">${k ? '+' + k + 'L' : 'Now'}: ${Math.round((w[l] || 0) * 100)}% wet</span>`; }).join(' ');
+  return `<div class="small" style="margin:.4rem 0">Track ${race.trackTemp}°C · ${trend}${race.yellow ? ` · <b class="warn">Yellow S${race.yellow.sector}</b>` : ''}</div>
+  <div style="max-height:44vh;overflow:auto"><table class="tbl small"><thead><tr><th>P</th><th>Driver</th><th>Gap</th><th>Last</th><th>Tyre</th><th>Grip</th><th>Age</th><th>Stops</th><th>Status</th></tr></thead><tbody>${order.map((c) => `<tr class="${c.isPlayer ? 'pl' : ''}"><td>${c.pos}</td><td><span class="sw" style="background:${c.color}"></span> ${esc(c.short)}</td><td class="mono">${gapOf(race, c, order, 'leader')}</td><td class="mono">${c.lastLap ? fmtTime(c.lastLap) : '--'}</td><td>${c.dnf ? '' : tyreBadge(c.tyre.c)}</td><td>${c.dnf ? '' : grip(c.tyre) + '%'}</td><td>${c.tyre.age}L</td><td>${c.stops.map((x) => 'L' + x.lap + '→' + x.to).join(' ') || '—'}</td><td class="tiny">${c.dnf ? '<span class="bad">' + esc(c.dnf) + '</span>' : c.damage ? '<span class="warn">damage</span>' : c.dirty ? 'dirty air' : ''}</td></tr>`).join('')}</tbody></table></div>`;
 }
 function showDecision(race, p) {
   const mine = race.cars.filter((c) => c.isPlayer && !c.dnf && !c.finished);
-  const titles = { sc: '🟡 Safety Car', rain: '🌧️ Rain', dry: '☀️ Track drying', cliff: '⚠️ Tyre cliff', failure: '🔧 Technical problem', damage: '💥 Damage', orders: '📻 Team orders', plan: '📋 Strategy check', fuel: '⛽ Fuel' };
+  const titles = { red: '🟥 Red flag', vsc: '🟡 Virtual Safety Car', sc: '🟡 Safety Car', rain: '🌧️ Rain', dry: '☀️ Track drying', cliff: '⚠️ Tyre cliff', failure: '🔧 Technical problem', damage: '💥 Damage', orders: '📻 Team orders', plan: '📋 Strategy check', fuel: '⛽ Fuel' };
   const car = p.carId ? carById(race, p.carId) : null;
   let body = '';
-  if (['sc', 'rain', 'dry'].includes(p.type)) body = mine.map((c) => tyreRow(race, c)).join('');
+  if (['sc', 'vsc', 'red', 'rain', 'dry'].includes(p.type)) body = mine.map((c) => tyreRow(race, c)).join('');
   if (p.type === 'cliff' && car) body = tyreRow(race, car) + `<div class="row"><button class="btn sm" data-act="dmode" data-arg="${car.id}:conserve">Switch to Conserve</button></div>`;
   if (p.type === 'damage' && car) body = `<div class="row">${['S', 'M', 'H', 'I', 'W'].map((x) => `<button class="btn sm" data-act="dpit" data-arg="${car.id}:${x}">Repair + ${COMPOUNDS[x].name}</button>`).join('')}<button class="btn sm" data-act="dstay" data-arg="${car.id}">Continue</button></div>`;
   if (p.type === 'failure' && car) body = `<div class="row"><button class="btn sm" data-act="dmode" data-arg="${car.id}:conserve">Nurse the car (Conserve)</button><button class="btn sm" data-act="dclose">Keep pushing</button></div>`;
   if (p.type === 'fuel' && car) body = `<div class="row"><button class="btn sm" data-act="dmode" data-arg="${car.id}:conserve">Lift & coast (Conserve)</button><button class="btn sm" data-act="dclose">Ignore</button></div>`;
-  if (p.type === 'plan') body = mine.map((c) => { const rest = c.plan.stops.slice(c.planIdx); const k = race.degMult || 1; const adj = rest.map((st) => Math.max(c.lapsDone + 1, Math.min(race.laps - 1, Math.round(c.lapsDone + (st.lap - c.lapsDone) / k)))); return `<div class="carpanel"><div class="hd"><span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b><span class="pill">P${c.pos}</span>${tyreBadge(c.tyre.c)}<span class="tiny muted">wear ${Math.round(c.tyre.wear)}% after ${c.tyre.age} laps</span></div>
+  if (p.type === 'plan') body = mine.map((c) => { const rest = c.plan.stops.slice(c.planIdx); const k = race.degMult || 1; const adj = rest.map((st) => Math.max(c.lapsDone + 1, Math.min(race.laps - 1, Math.round(c.lapsDone + (st.lap - c.lapsDone) / k)))); return `<div class="carpanel"><div class="hd"><span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b><span class="pill">P${c.pos}</span>${tyreBadge(c.tyre.c)}<span class="tiny muted">grip ${grip(c.tyre)}% after ${c.tyre.age} laps</span></div>
     <div class="small">Current plan: ${rest.length ? rest.map((st) => `L${st.lap} → ${tyreBadge(st.c)}`).join(' ') : 'no more stops'}${rest.length ? ` · <span class="muted">adjusted for today's wear: ${adj.map((l, i) => `L${l} → ${rest[i].c}`).join(', ')}</span>` : ''}</div>
     <div class="row" style="margin-top:.4rem"><button class="btn sm on" data-act="dplan" data-arg="${c.id}:keep">Continue with plan</button><button class="btn sm" data-act="dplan" data-arg="${c.id}:replan">Engineers adapt to today's wear</button><button class="btn sm" data-act="dplan" data-arg="${c.id}:manual">I'll call stops manually</button></div></div>`; }).join('');
   if (p.type === 'orders') body = `<div class="opts"><button class="btn" data-act="dorders" data-arg="${p.carId}:${p.mateId}:swap"><b>Swap positions</b>&nbsp;<span class="muted small">Faster car through; morale hit for the other driver.</span></button><button class="btn" data-act="dorders" data-arg="${p.carId}:${p.mateId}:hold"><b>Hold positions</b>&nbsp;<span class="muted small">No risk of contact; frustrated faster driver.</span></button><button class="btn" data-act="dorders" data-arg="${p.carId}:${p.mateId}:race"><b>Let them race</b>&nbsp;<span class="muted small">Fair, but risk of contact and time loss.</span></button></div>`;
-  modal(`<div class="decision" style="padding:.2rem;border:0"><h2>${titles[p.type] || 'Decision'} <span class="muted small">Lap ${race.lap}/${race.laps}</span></h2><p>${esc(p.text)}</p>${recommendation(race, p)}${body}<div class="row" style="justify-content:flex-end;margin-top:1rem"><button class="btn primary" data-act="dclose">Resume race ▶</button></div></div>`, { wide: true, dismiss: false });
+  modal(`<div class="decision" style="padding:.2rem;border:0"><h2>${titles[p.type] || 'Decision'} <span class="muted small">Lap ${race.lap}/${race.laps}</span></h2><p>${esc(p.text)}</p>${recommendation(race, p)}${body}<details class="rdata"><summary>📊 Full race data (all cars, weather)</summary>${raceDataHtml(race)}</details><div class="row" style="justify-content:flex-end;margin-top:1rem"><button class="btn" data-act="dpeek">👁 View race screen (stays paused)</button><button class="btn primary" data-act="dclose">Resume race ▶</button></div></div>`, { wide: true, dismiss: false });
 }
 on({
   dpit: (arg, el) => { const [id, c] = arg.split(':'); actions.pit(R(), id, c); el.parentElement.querySelectorAll('.btn').forEach((b) => b.classList.remove('on')); el.classList.add('on'); },
@@ -123,7 +130,7 @@ on({
   dmode: (arg, el) => { const [id, m] = arg.split(':'); actions.mode(R(), id, m); el.classList.add('on'); },
   dorders: (arg) => { const [a, b, k] = arg.split(':'); actions.orders(R(), a, b, k); closeModal(); },
   dplan: (arg, el) => { const [id, k] = arg.split(':'); const r = R(); if (k === 'replan') actions.replan(r, id); else actions.auto(r, id, k === 'keep'); el.parentElement.querySelectorAll('.btn').forEach((b) => b.classList.toggle('on', b === el)); toast(k === 'keep' ? 'Plan kept.' : k === 'replan' ? 'Plan adapted to race-day wear.' : 'Manual pit calls — use the pit buttons.', 'info', 1800); },
-  dclose: () => closeModal(),
+  dclose: () => { document.getElementById('peekbar')?.remove(); closeModal(); },
 });
 
 function drawMap(race, len, trk) {
@@ -144,11 +151,11 @@ function drawMap(race, len, trk) {
       const k = race.sc.state === 'sc' ? 1.45 : race.sc.state === 'vsc' ? 1.3 : 1;
       const drs = drsOn(race) && (app._iv?.[c.id] ?? 9) < 1;
       const cap = race.sc.state === 'sc' ? 175 : race.sc.state === 'vsc' ? 215 : null;
-      updateTele(trk.t, c.id === sel ? 'rtele' : 'rtele2', `<span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b> <span class="muted">P${c.pos} · L${Math.min(c.lapsDone + 1, race.laps)}${inPit ? ' · PIT LANE' : ''}${cap ? ` · <b style="color:#ffd400">${race.sc.state === 'sc' ? 'SC — no overtaking, DRS off' : 'VSC — delta speed, DRS off'}</b>` : ''}</span>`, f, { k, state: c.finished ? 'garage' : inPit ? 'pit' : 'track', drs, cap });
+      updateTele(trk.t, c.id === sel ? 'rtele' : 'rtele2', `<span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b> <span class="muted">P${c.pos} · L${Math.min(c.lapsDone + 1, race.laps)}${inPit ? ' · PIT LANE' : ''}${cap ? ` · <b style="color:#ffd400">${race.sc.state === 'sc' ? 'SC — no overtaking, DRS off' : 'VSC — delta speed, DRS off'}</b>` : ''}</span>`, f, { k, state: c.finished ? 'garage' : inPit ? 'pit' : 'track', drs, cap, follow: !!c.dirty });
     }
   }
   const sc = document.getElementById('scCar');
-  showFlag('map', race.sc.state === 'sc' ? 'SAFETY CAR' : race.sc.state === 'vsc' ? 'VIRTUAL SAFETY CAR' : race.finished ? 'CHEQUERED FLAG' : null);
+  showFlag('map', race.red > 0 ? 'RED FLAG' : race.sc.state === 'sc' ? 'SAFETY CAR' : race.sc.state === 'vsc' ? 'VIRTUAL SAFETY CAR' : race.finished ? 'CHEQUERED FLAG' : race.yellow ? `YELLOW FLAG — SECTOR ${race.yellow.sector}` : null);
   if (sc) { if (race.sc.state === 'sc' && leaderD != null) { const p = pointAt(trk.pts, leaderD + 0.025); sc.style.display = ''; sc.setAttribute('transform', `translate(${p[0]},${p[1]})`); } else sc.style.display = 'none'; }
 }
 const crossAt = (c, k) => { let t = 0; for (let i = 0; i < k && i < c.laps.length; i++) t += c.laps[i]; return t; };
@@ -164,9 +171,9 @@ function gapOf(race, c, order, mode) {
 }
 function drawBar(race, st) {
   const el = document.getElementById('racebar'); if (!el) return;
-  const flag = race.finished ? '<span class="flag chk">🏁 FINISHED</span>' : race.sc.state === 'sc' ? '<span class="flag sc">SAFETY CAR</span>' : race.sc.state === 'vsc' ? '<span class="flag vsc">VSC</span>' : '<span class="flag green">GREEN</span>';
+  const flag = race.finished ? '<span class="flag chk">🏁 FINISHED</span>' : race.red > 0 ? '<span class="flag red">RED FLAG</span>' : race.sc.state === 'sc' ? '<span class="flag sc">SAFETY CAR</span>' : race.sc.state === 'vsc' ? '<span class="flag vsc">VSC</span>' : '<span class="flag green">GREEN</span>'; const yl = race.yellow && !race.finished ? `<span class="flag vsc">YELLOW S${race.yellow.sector}</span>` : '';
   const sp = app.settings.speed;
-  const html = `<span class="lap mono">L${Math.min(race.lap, race.laps)}/${race.laps}</span>${flag}<span class="flag ${drsOn(race) ? 'drs-on' : 'drs-off'}">DRS ${drsOn(race) ? 'ENABLED' : 'DISABLED'}</span><span class="small">${wetLabel(race.wetness)}${race.wetness > 0.05 ? ` (${Math.round(race.wetness * 100)}%)` : ''}</span>
+  const html = `<span class="lap mono">L${Math.min(race.lap, race.laps)}/${race.laps}</span>${flag}${yl}<span class="flag ${drsOn(race) ? 'drs-on' : 'drs-off'}">DRS ${drsOn(race) ? 'ENABLED' : 'DISABLED'}</span><span class="small">${wetLabel(race.wetness)}${race.wetness > 0.05 ? ` (${Math.round(race.wetness * 100)}%)` : ''}</span>
   <span class="sp"></span>
   ${race.finished ? `<button class="btn primary" data-act="toDebrief">Race debrief →</button>` : `<div class="row speed" role="group" aria-label="Simulation speed"><button class="btn sm ${st?.running ? '' : 'on'}" data-tap="rpause" aria-label="Pause">${st?.running ? '⏸' : '▶'}</button>
   ${Object.entries({ normal: '1×', fast: '3×', vfast: '9×' }).map(([k, l]) => `<button class="btn sm ${sp === k ? 'on' : ''}" data-tap="rspeed" data-arg="${k}">${l}</button>`).join('')}<button class="btn sm ghost" data-act="rskip" title="Let the engineers run the rest">⏭</button></div>`}`;
@@ -181,7 +188,7 @@ function drawUI(race) {
   const fl = Math.min(...race.cars.flatMap((c) => c.laps.slice(1)).filter(Number.isFinite), Infinity);
   app._iv = {}; for (const c of order) { const g = gapOf(race, c, order, 'interval'); app._iv[c.id] = parseFloat(String(g).replace('+', '')); }
   const lastCls = (c) => { const l = c.laps[c.laps.length - 1]; if (!l || c.laps.length < 2) return ''; if (l <= fl + 1e-6) return 'purple'; return l <= Math.min(...c.laps.slice(1)) + 1e-6 ? 'pb' : ''; };
-  if (tw) tw.innerHTML = `<table><tbody>${order.map((c) => `<tr class="${c.isPlayer ? 'pl' : ''} ${c.dnf ? 'dnf' : ''} ${app.tab.teleCar === c.id ? 'sel' : ''}" data-tap="teleSel" tabindex="0" data-arg="${c.id}" style="cursor:pointer"><td class="pos">${c.pos}</td><td><span class="sw" style="background:${c.color}"></span></td><td class="nm">${esc(c.short)}${c.pos < c.grid && !c.dnf ? ' <span class="good tiny">▲' + (c.grid - c.pos) + '</span>' : c.pos > c.grid && !c.dnf ? ' <span class="bad tiny">▼' + (c.pos - c.grid) + '</span>' : ''}</td><td class="mono small">${gapOf(race, c, order, mode)}</td><td class="mono tiny lt ${lastCls(c)}">${c.lastLap ? fmtTime(c.lastLap) : ''}</td><td>${c.dnf ? '' : tyreBadge(c.tyre.c)}</td><td class="tiny muted">${c.dnf ? esc(c.dnf).slice(0, 10) : c.tyre.age + 'L'}${c.stops.length ? ' ·' + c.stops.length + 'P' : ''}</td></tr>`).join('')}</tbody></table>`;
+  if (tw) tw.innerHTML = `<table><tbody>${order.map((c) => `<tr class="${c.isPlayer ? 'pl' : ''} ${c.dnf ? 'dnf' : ''} ${app.tab.teleCar === c.id ? 'sel' : ''}" data-tap="teleSel" tabindex="0" data-arg="${c.id}" style="cursor:pointer"><td class="pos">${c.pos}</td><td><span class="sw" style="background:${c.color}"></span></td><td class="nm">${esc(c.short)}${c.pos < c.grid && !c.dnf ? ' <span class="good tiny">▲' + (c.grid - c.pos) + '</span>' : c.pos > c.grid && !c.dnf ? ' <span class="bad tiny">▼' + (c.pos - c.grid) + '</span>' : ''}</td><td class="mono small">${gapOf(race, c, order, mode)}</td><td class="mono tiny lt ${lastCls(c)}">${c.lastLap ? fmtTime(c.lastLap) : ''}</td><td>${c.dnf ? '' : tyreBadge(c.tyre.c)}</td><td class="tiny muted">${c.dnf ? esc(c.dnf).slice(0, 10) : c.tyre.age + 'L ' + grip(c.tyre) + '%'}${c.stops.length ? ' ·' + c.stops.length + 'P' : ''}</td></tr>`).join('')}</tbody></table>`;
   const ctrl = document.getElementById('ctrl');
   const html = race.cars.filter((c) => c.isPlayer).map((c) => carPanel(race, c, order, info)).join('') + `<div class="card tight small muted">Space = pause. Critical events pause automatically (configure in Settings). Pit calls take effect at the end of the current lap.</div>`;
   if (ctrl && ctrl._html !== html) { ctrl.innerHTML = html; ctrl._html = html; }
@@ -195,7 +202,7 @@ function carPanel(race, c, order, info) {
   const ahead = order[c.pos - 2], behind = order[c.pos];
   const gA = ahead && !ahead.dnf && ahead.lapsDone === c.lapsDone ? (c.total - ahead.total).toFixed(1) : '—';
   const gB = behind && !behind.dnf && behind.lapsDone === c.lapsDone ? (behind.total - c.total).toFixed(1) : '—';
-  const wear = info >= 0.8 ? Math.round(c.tyre.wear) + '%' : info >= 0.6 ? '~' + Math.round(c.tyre.wear / 10) * 10 + '%' : c.tyre.wear > 70 ? 'High' : c.tyre.wear > 40 ? 'Medium' : 'Low';
+  const g_ = grip(c.tyre); const wear = info >= 0.8 ? g_ + '%' : info >= 0.6 ? '~' + Math.round(g_ / 10) * 10 + '%' : g_ < 30 ? 'Low' : g_ < 60 ? 'Medium' : 'High';
   const next = c.plan.stops[c.planIdx];
   const lapsLeft = race.laps - c.lapsDone;
   const fuelMargin = c.fuel - (100 / race.laps) * lapsLeft;
@@ -204,7 +211,7 @@ function carPanel(race, c, order, info) {
   if (c.finished) return `<div class="carpanel"><div class="hd"><span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b><span class="pill good">Finished P${c.pos}</span></div></div>`;
   return `<div class="carpanel"><div class="hd"><span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b><span class="pill">P${c.pos}</span><span class="sp"></span><span class="tiny muted mono">last ${c.lastLap ? fmtTime(c.lastLap) : '--'}</span></div>
   <div class="row small"><span>Ahead <b class="mono">${gA}</b></span><span>Behind <b class="mono">${gB}</b></span>${c.damage > 0 ? `<span class="bad">Damage +${c.damage.toFixed(1)}s</span>` : ''}${c.failurePen > 0 ? `<span class="warn">Fault +${c.failurePen.toFixed(1)}s</span>` : ''}</div>
-  <div class="row small" style="margin-top:.3rem">${tyreBadge(c.tyre.c)} <span>${COMPOUNDS[c.tyre.c].name} · ${c.tyre.age} laps · wear ${wear}</span></div>${bar(c.tyre.wear, 100, c.tyre.wear > cliff ? 'var(--bad)' : c.tyre.wear > cliff - 12 ? 'var(--warn)' : 'var(--good)')}
+  <div class="row small" style="margin-top:.3rem">${tyreBadge(c.tyre.c)} <span>${COMPOUNDS[c.tyre.c].name} · ${c.tyre.age} laps · grip ${wear}${c.sets ? ` · sets left: ${['S','M','H','I','W'].map((x) => { const n = c.sets.filter((y) => y.c === x).length; return n ? x + n : ''; }).filter(Boolean).join(' ')}` : ''}${c.dirty ? ' · <span class="warn">dirty air</span>' : ''}</span></div>${bar(100 - c.tyre.wear, 100, c.tyre.wear > cliff ? 'var(--bad)' : c.tyre.wear > cliff - 12 ? 'var(--warn)' : 'var(--good)')}
   <div class="row tiny muted" style="margin-top:.2rem"><span>Fuel ${fuelMargin >= 0 ? '+' : ''}${(fuelMargin / (100 / race.laps)).toFixed(1)} laps</span><span>Battery ${Math.round(c.battery)}%</span><span>${next ? `Plan: L${next.lap} → ${next.c}` : 'No more planned stops'}</span></div>
   <div class="tiny muted" style="margin-top:.35rem">Driving mode</div><div class="seg">${MODES.map((m) => `<button class="btn sm ${c.mode === m ? 'on' : ''}" data-act="rmode" data-arg="${c.id}:${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}</div>
   <div class="tiny muted">ERS</div><div class="seg">${ERS_MODES.map((m) => `<button class="btn sm ${c.ers === m ? 'on' : ''}" data-act="rers" data-arg="${c.id}:${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}</div>
@@ -217,6 +224,8 @@ on({
   mtab: (k, el) => { document.getElementById('racegrid').dataset.mt = k; el.parentElement.querySelectorAll('.btn').forEach((b) => b.classList.toggle('on', b === el)); },
   gapMode: () => { app.tab.gapMode = app.tab.gapMode === 'leader' ? 'interval' : 'leader'; document.getElementById('gapModeBtn').textContent = app.tab.gapMode === 'leader' ? 'To leader' : 'Interval'; drawUI(R()); },
   rpause: () => togglePause(),
+  dpeek: () => { const m = document.querySelector('.modal-back'); if (!m) return; m.classList.add('peek'); let b = document.getElementById('peekbar'); if (!b) { b = document.createElement('div'); b.id = 'peekbar'; b.className = 'peekbar'; b.innerHTML = '⏸ Race paused — decision pending. <button class="btn sm primary" data-act="dunpeek">Back to decision</button>'; document.body.appendChild(b); } },
+  dunpeek: () => { document.querySelector('.modal-back')?.classList.remove('peek'); document.getElementById('peekbar')?.remove(); },
   rspeed: (k) => { updateSettings({ speed: k }); drawBar(R(), app._raceSt); },
   rskip: async () => {
     const ok = await confirmBox('Simulate to the flag?', 'Engineers will run the rest of the race using your plan. Critical decisions will be made automatically.', 'Simulate');

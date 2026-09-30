@@ -109,12 +109,12 @@ export function createWorld(opts) {
     ds.slice(2).forEach((d) => (d.teamId = null));
   }
   const len = opts.seasonLength || 12;
-  const calendar = opts.mode === 'quick' ? [opts.trackId] : pickCalendar(rng, len);
+  const calendar = opts.mode === 'quick' ? [opts.trackId] : pickCalendar(rng, len, opts.calendarOrder);
   const P = teams[playerId];
   const prof = PROFILES[P.profile] || PROFILES.midfield;
   const state = {
     version: SAVE_VERSION, mode: opts.mode, seed, rngS: rng.s, difficulty: opts.difficulty || 'standard', ironman: !!opts.ironman,
-    createdAt: Date.now(), season: 1, year: 2027, round: 0, calendar, raceLength: opts.raceLength || 0.35, player: playerId,
+    createdAt: Date.now(), season: 1, year: 2027, round: 0, calendar, calendarOrder: opts.calendarOrder || 'real', raceLength: opts.raceLength || 0.35, player: playerId,
     teams, drivers, projects: [], ledger: [], inbox: [], results: [], news: [],
     sponsors: [], sponsorOffers: [], staffMarket: [], pendingEvent: null, weekend: null, achievements: {},
     board: { confidence: 65, target: opts.custom?.target ?? prof.target, patience: prof.boardPatience * diff.patience, warnings: 0 },
@@ -133,7 +133,8 @@ export function createWorld(opts) {
   return state;
 }
 // Real 2026 calendar order; shorter seasons take an evenly spaced subset (keeps the season's geography).
-export function pickCalendar(rng, len) {
+export function pickCalendar(rng, len, order = 'real') {
+  if (order === 'random') return rng.shuffle(TRACKS).slice(0, Math.min(len, TRACKS.length)).map((t) => t.id);
   const n = Math.min(len, TRACKS.length); if (n >= TRACKS.length) return TRACKS.map((t) => t.id);
   const off = rng.next() * (TRACKS.length / n); const out = [];
   for (let i = 0; i < n; i++) out.push(TRACKS[Math.floor(off + i * TRACKS.length / n) % TRACKS.length].id);

@@ -549,7 +549,7 @@ export function startNextSeason(state) {
   state.sponsors.forEach((s) => { s.racesLeft = Math.max(s.racesLeft, 0); });
   state.projects = []; // new chassis: in-flight concepts do not carry over
   state.season++; state.year++; state.round = 0; state.results = state.results.filter((x) => x.season >= state.season - 2);
-  state.calendar = pickCalendar(r, state.calendar.length);
+  state.calendar = pickCalendar(r, state.calendar.length, state.calendarOrder);
   state.regulation = { next: null, announced: false };
   if (state.pendingCapPen) { P.points = -state.pendingCapPen; state.pendingCapPen = 0; }
   // board target adjusts to reputation / last result
