@@ -4,14 +4,30 @@ import { trackById } from '../data/tracks.js';
 import * as C from '../engines/careerEngine.js';
 import { ensureSchedule, phaseOf, PHASE_LABEL, weekDate, fmtDate, weeksToRace, raceDue, YEAR_WEEKS } from '../engines/calendarEngine.js';
 
+const MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const flagCode = (t) => (t?.country || '???').replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase();
+// Weeks of the year grouped by month. Each week is a cell: race weeks carry the venue code.
+function cellsByMonth(s) {
+  const sc = s.schedule; const out = MN.map(() => []);
+  for (let w = 1; w <= YEAR_WEEKS; w++) {
+    const m = weekDate(sc.year, w).getUTCMonth(); const ri = sc.weeks.indexOf(w);
+    const t = ri >= 0 ? trackById(s.calendar[ri]) : null;
+    const kind = ri >= 0 ? (ri < s.round ? 'race done' : ri === s.round ? 'race next' : 'race') : w === sc.testing ? 'test' : w === sc.devOpen ? 'dev' : w === sc.start ? 'st' : w === sc.end ? 'end' : '';
+    out[Math.min(11, m)].push({ w, kind, t, ri, past: w < s.week, now: w === s.week });
+  }
+  return out;
+}
 export function yearStrip(s, compact = false) {
   ensureSchedule(s); const sc = s.schedule; if (!sc) return '';
-  const pct = (w) => ((w - 1) / (YEAR_WEEKS - 1)) * 100;
-  const months = Array.from({ length: 12 }, (_, m) => { const d = new Date(Date.UTC(sc.year, m, 1)); const w = Math.max(1, Math.round((d - weekDate(sc.year, 1)) / 6048e5) + 1); return `<span class="ym" style="left:${pct(w)}%">${['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'][m]}</span>`; }).join('');
-  const races = sc.weeks.map((w, i) => { const t = trackById(s.calendar[i]); const done = i < s.round; return `<i class="yr ${done ? 'done' : ''} ${i === s.round ? 'next' : ''}" style="left:${pct(w)}%" title="R${i + 1} ${esc(t?.name || '')} — ${fmtDate(weekDate(sc.year, w))} (week ${w})"></i>`; }).join('');
-  const mk = (w, cls, label) => `<i class="ymk ${cls}" style="left:${pct(w)}%" title="${label} — week ${w}, ${fmtDate(weekDate(sc.year, w))}"></i>`;
-  return `<div class="ystrip ${compact ? 'compact' : ''}"><div class="ybar"><div class="yseason" style="left:${pct(sc.first)}%;width:${pct(sc.last) - pct(sc.first)}%"></div>${mk(sc.start, 'st', 'Year starts')}${mk(sc.devOpen, 'dev', 'Development opens')}${mk(sc.testing, 'test', 'Pre-season testing')}${mk(sc.end, 'end', 'Year closes')}${races}<i class="ynow" style="left:${pct(s.week)}%" title="Now: week ${s.week}"></i></div><div class="ymonths">${months}</div>
-  ${compact ? '' : `<div class="tiny muted ylegend"><span><i class="ymk st"></i>Year start</span><span><i class="ymk dev"></i>Development opens</span><span><i class="ymk test"></i>Testing</span><span><i class="yr"></i>Race</span><span><i class="ynow"></i>Today</span><span><i class="ymk end"></i>Year closes</span></div>`}</div>`;
+  if (compact) {
+    // one-row progress rail: filled up to today, race pips, pulsing "you are here"
+    const pct = (w) => ((w - 1) / (YEAR_WEEKS - 1)) * 100;
+    return `<div class="yrail"><div class="yrail-fill" style="width:${pct(s.week)}%"></div>${sc.weeks.map((w, i) => `<i class="yp ${i < s.round ? 'done' : i === s.round ? 'next' : ''}" style="left:${pct(w)}%" title="R${i + 1} ${esc(trackById(s.calendar[i])?.name || '')} · ${fmtDate(weekDate(sc.year, w))}"></i>`).join('')}<i class="yhere" style="left:${pct(s.week)}%"></i></div>
+    <div class="yrail-m">${MN.map((m) => `<span>${m[0]}</span>`).join('')}</div>`;
+  }
+  const months = cellsByMonth(s);
+  return `<div class="ycal">${months.map((cells, m) => `<div class="ycm ${cells.some((c) => c.now) ? 'cur' : ''}"><div class="ycmh">${MN[m]}</div><div class="ycw">${cells.map((c) => `<div class="yc ${c.kind} ${c.past ? 'past' : ''} ${c.now ? 'now' : ''}" title="Week ${c.w} · ${fmtDate(weekDate(sc.year, c.w))}${c.t ? ` · R${c.ri + 1} ${esc(c.t.name)}` : c.kind === 'test' ? ' · Pre-season testing' : c.kind === 'dev' ? ' · Development opens' : c.kind === 'st' ? ' · Year starts' : c.kind === 'end' ? ' · Year closes' : ''}">${c.t ? `<span>${flagCode(c.t)}</span>` : c.kind === 'test' ? '🧪' : c.kind === 'dev' ? '🔧' : c.kind === 'end' ? '🏁' : c.kind === 'st' ? '▶' : ''}</div>`).join('')}</div></div>`).join('')}</div>
+  <div class="tiny muted ylegend"><span><i class="yc sw race"></i>Race</span><span><i class="yc sw race next"></i>Next race</span><span><i class="yc sw race done"></i>Done</span><span><i class="yc sw test"></i>Testing</span><span><i class="yc sw dev"></i>Development opens</span><span><i class="yc sw now"></i>This week</span></div>`;
 }
 
 export function yearPlanList(s) {
@@ -30,8 +46,12 @@ export function clockCard(s) {
     ? `<button class="btn" data-act="wkNext" ${s.pendingEvent ? 'disabled' : ''}>Next week ▶</button><button class="btn primary" data-act="wkClose">Close the year → season review</button>`
     : due ? `<button class="btn primary" data-act="go" data-arg="weekend" ${s.pendingEvent ? 'disabled title="Resolve the pending decision first"' : ''}>${s.weekend ? 'Resume weekend' : 'Go to race weekend'} →</button>`
       : `<button class="btn primary" data-act="wkNext" ${s.pendingEvent ? 'disabled title="Resolve the pending decision first"' : ''}>Next week ▶</button><button class="btn" data-act="wkRace" ${s.pendingEvent ? 'disabled' : ''}>Advance to race week ⏩</button>`;
-  return `<div class="card clock"><div class="row"><h4 style="margin:0">📅 ${s.year} · Week ${s.week}/${YEAR_WEEKS}</h4><span class="sp"></span><span class="pill">${PHASE_LABEL[ph]}</span></div>
-  <div class="small muted" style="margin:.2rem 0 .4rem">Monday ${fmtDate(weekDate(sc.year, s.week))}${s.week < sc.devOpen ? ` · development opens week ${sc.devOpen}` : ''}</div>${next}
+  const R = 26, L = 2 * Math.PI * R, prog = s.week / YEAR_WEEKS;
+  const ring = `<svg class="wring" viewBox="0 0 64 64" width="84" height="84"><circle cx="32" cy="32" r="${R}" class="bg"/><circle cx="32" cy="32" r="${R}" class="fg" stroke-dasharray="${(L * prog).toFixed(1)} ${L.toFixed(1)}"/><text x="32" y="29" class="wk">WEEK</text><text x="32" y="43" class="wn">${s.week}</text></svg>`;
+  const cd = off ? '' : `<div class="cdown ${due ? 'due' : ''}"><b>${due ? 'RACE' : n}</b><span>${due ? 'WEEK' : n === 1 ? 'week to go' : 'weeks to go'}</span></div>`;
+  return `<div class="card clock"><div class="clockrow">${ring}<div class="clockmain"><div class="row" style="gap:.4rem"><span class="tiny muted">${s.year} · Monday ${fmtDate(weekDate(sc.year, s.week))}</span><span class="pill ph-${ph}">${PHASE_LABEL[ph]}</span></div>
+  ${off ? `<div class="small" style="margin-top:.3rem">All ${s.calendar.length} races done — ${YEAR_WEEKS - s.week} week(s) until the year closes.</div>` : `<div class="nextrace"><span class="tiny muted">NEXT · R${s.round + 1}/${s.calendar.length}</span><b>${esc(tr.name)}</b><span class="small">${fmtDate(weekDate(sc.year, sc.weeks[s.round]))} · ${esc(tr.country || '')}</span></div>`}
+  ${s.week < sc.devOpen ? `<div class="tiny warn">Development opens in week ${sc.devOpen}</div>` : ''}</div>${cd}</div>
   ${yearStrip(s, true)}
   <div class="row" style="margin-top:.6rem">${btns}</div>
   <div class="tiny muted" style="margin-top:.3rem">Each week: projects progress, fatigue changes, and offers or problems may appear. Advancing stops early when a decision is needed.</div></div>`;
@@ -42,3 +62,8 @@ on({
   wkRace: () => { const r = C.advanceToRace(app.state); persist(); render(); const due = app.state.round < app.state.calendar.length && app.state.week >= app.state.schedule.weeks[app.state.round]; toast(due ? 'Race week! Travel to the circuit.' : `Stopped in week ${app.state.week}: a decision is needed.`, due ? 'good' : 'warn'); },
   wkClose: () => { C.closeYear(app.state); persist(); go('review'); },
 });
+
+export function weekMini(s) {
+  if (s.mode !== 'career') return ''; ensureSchedule(s); const sc = s.schedule;
+  return `<div class="card tight weekmini"><div class="row" style="gap:.6rem"><span class="wmn"><small>WEEK</small>${s.week}</span><span class="small"><b>${s.year}</b> · ${fmtDate(weekDate(sc.year, s.week))} · <span class="good">Race week — R${s.round + 1}/${s.calendar.length}</span></span></div>${yearStrip(s, true)}</div>`;
+}

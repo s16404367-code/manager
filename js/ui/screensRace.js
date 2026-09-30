@@ -28,6 +28,7 @@ screen('race', {
       <div class="c-map"><div class="mapwrap">${mapSvg(t, 'map')}${sectorLegend()}</div>
         <div class="card tight" style="margin-top:.8rem"><h4 style="margin:0 0 .4rem">Telemetry <span class="tiny muted" style="text-transform:none;letter-spacing:0">— tap any car in the timing table (yours or a rival)</span></h4>${teleHtml(t, 'rtele')}</div>
 </div>
+      <div class="pitfx" id="pitfx" aria-live="polite"></div>
       <div class="c-side"><div class="c-ctrl" id="ctrl"></div><div class="card c-feed" style="margin-top:.8rem"><h4>Team radio & race control</h4><div class="feed" id="feed"></div></div></div>
     </div>`;
   },
@@ -185,7 +186,34 @@ function drawBar(race, st) {
   ${Object.entries({ normal: '1×', fast: '3×', vfast: '9×' }).map(([k, l]) => `<button class="btn sm ${sp === k ? 'on' : ''}" data-tap="rspeed" data-arg="${k}">${l}</button>`).join('')}<button class="btn sm ghost" data-act="rskip" title="Let the engineers run the rest">⏭</button></div>`}`;
   if (el._html !== html) { el.innerHTML = html; el._html = html; }
 }
+// Pit-stop animation: slides up at the bottom of the live screen — old tyre rolls off, new one rolls on, stop timer counts.
+const pitQ = []; let pitBusy = false;
+function watchPits(race) {
+  race._seenStops ||= {};
+  if (race.finished) { for (const c of race.cars) race._seenStops[c.id] = c.stops.length; return; }
+  for (const c of race.cars) {
+    const n = c.stops.length, seen = race._seenStops[c.id] ?? n;
+    if (race._seenStops[c.id] == null) { race._seenStops[c.id] = n; continue; }
+    for (let i = seen; i < n; i++) if (c.isPlayer || c.pos <= 10 || pitQ.length < 3) pitQ.push({ c, st: c.stops[i] });
+    race._seenStops[c.id] = n;
+  }
+  pitQ.sort((a, b) => (b.c.isPlayer ? 1 : 0) - (a.c.isPlayer ? 1 : 0));
+  if (!pitBusy && pitQ.length) playPit(pitQ.shift());
+}
+function playPit({ c, st }) {
+  const el = document.getElementById('pitfx'); if (!el) return;
+  pitBusy = true;
+  const tyre = (x, cls) => `<span class="pfxtyre ${cls}" style="--tc:${COMPOUNDS[x].color}"><b>${x}</b></span>`;
+  el.innerHTML = `<div class="pfxcard ${c.isPlayer ? 'mine' : ''}" style="--team:${c.color}"><div class="pfxhd"><span class="pfxbox">BOX</span><span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b><span class="tiny muted">Lap ${st.lap}${st.sc && st.sc !== 'none' ? ' · under ' + st.sc.toUpperCase() : ''}</span></div>
+    <div class="pfxstage"><div class="pfxwheel">${tyre(st.from, 'out')}${tyre(st.to, 'in')}</div><div class="pfxtxt"><div>${COMPOUNDS[st.from].name} <span class="pfxarrow">➜</span> <b style="color:${COMPOUNDS[st.to].color}">${COMPOUNDS[st.to].name}</b></div><div class="pfxtimer mono"><span id="pfxt">0.0</span>s <span class="tiny muted">stationary · ${st.total}s total</span></div></div><div class="pfxgun"></div></div></div>`;
+  el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+  const t0 = performance.now(), dur = Math.max(1.8, st.stat) * 600; const tEl = () => document.getElementById('pfxt');
+  const tick = () => { const k = Math.min(1, (performance.now() - t0) / dur); const e = tEl(); if (e) e.textContent = (st.stat * k).toFixed(1); if (k < 1) requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+  setTimeout(() => { el.classList.remove('show'); setTimeout(() => { pitBusy = false; if (pitQ.length) playPit(pitQ.shift()); }, 350); }, dur + (c.isPlayer ? 2200 : 1300));
+}
 function drawUI(race) {
+  watchPits(race);
   const s = app.state; const order = updateOrder(race);
   drawBar(race, app._raceSt);
   const mode = app.tab.gapMode || 'interval';
@@ -194,7 +222,7 @@ function drawUI(race) {
   const fl = Math.min(...race.cars.flatMap((c) => c.laps.slice(1)).filter(Number.isFinite), Infinity);
   app._iv = {}; for (const c of order) { const g = gapOf(race, c, order, 'interval'); app._iv[c.id] = parseFloat(String(g).replace('+', '')); }
   const lastCls = (c) => { const l = c.laps[c.laps.length - 1]; if (!l || c.laps.length < 2) return ''; if (l <= fl + 1e-6) return 'purple'; return l <= Math.min(...c.laps.slice(1)) + 1e-6 ? 'pb' : ''; };
-  if (tw) tw.innerHTML = `<table><tbody>${order.map((c) => `<tr class="${c.isPlayer ? 'pl' : ''} ${c.dnf ? 'dnf' : ''} ${app.tab.teleCar === c.id ? 'sel' : ''}" data-tap="teleSel" tabindex="0" data-arg="${c.id}" style="cursor:pointer"><td class="pos">${c.pos}</td><td><span class="sw" style="background:${c.color}"></span></td><td class="nm">${esc(c.short)}${c.pos < c.grid && !c.dnf ? ' <span class="good tiny">▲' + (c.grid - c.pos) + '</span>' : c.pos > c.grid && !c.dnf ? ' <span class="bad tiny">▼' + (c.pos - c.grid) + '</span>' : ''}</td><td class="mono small">${gapOf(race, c, order, mode)}</td><td class="mono tiny lt ${lastCls(c)}">${c.lastLap ? fmtTime(c.lastLap) : ''}</td><td>${c.dnf ? '' : tyreBadge(c.tyre.c)}</td><td class="tiny muted">${c.dnf ? esc(c.dnf).slice(0, 10) : c.tyre.age + 'L ' + grip(c.tyre) + '%'}${c.stops.length ? ' ·' + c.stops.length + 'P' : ''}</td></tr>`).join('')}</tbody></table>`;
+  if (tw) tw.innerHTML = `<table><tbody>${order.map((c) => `<tr class="${c.isPlayer ? 'pl' : ''} ${c.dnf ? 'dnf' : ''} ${app.tab.teleCar === c.id ? 'sel' : ''}" data-tap="teleSel" tabindex="0" data-arg="${c.id}" style="cursor:pointer"><td class="pos">${c.pos}</td><td><span class="sw" style="background:${c.color}"></span></td><td class="nm">${esc(c.short)}${c.pos < c.grid && !c.dnf ? ' <span class="good tiny">▲' + (c.grid - c.pos) + '</span>' : c.pos > c.grid && !c.dnf ? ' <span class="bad tiny">▼' + (c.pos - c.grid) + '</span>' : ''}</td><td class="mono small">${gapOf(race, c, order, mode)}</td><td class="mono tiny lt ${lastCls(c)}">${c.lastLap ? fmtTime(c.lastLap) : ''}</td><td>${c.dnf ? '' : tyreBadge(c.tyre.c)}</td><td class="tiny muted">${c.dnf ? esc(c.dnf).slice(0, 10) : c.tyre.age + 'L ' + grip(c.tyre) + '%'}${c.stops.length ? ' ·' + c.stops.length + 'P' : ''}${c.stops.length && c.stops[c.stops.length - 1].lap >= c.lapsDone - 1 ? ' <b class="pitpill">PIT</b>' : ''}</td></tr>`).join('')}</tbody></table>`;
   const ctrl = document.getElementById('ctrl');
   const html = race.cars.filter((c) => c.isPlayer).map((c) => carPanel(race, c, order, info)).join('') + `<div class="card tight small muted">Space = pause. Critical events pause automatically (configure in Settings). Pit calls take effect at the end of the current lap.</div>`;
   if (ctrl && ctrl._html !== html) { ctrl.innerHTML = html; ctrl._html = html; }

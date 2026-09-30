@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.8
+- Pit-stop animation at the bottom of the race screen for every stop (your cars first): BOX flash, old tyre rolls off, new tyre rolls on, stationary timer, "Soft → Medium" label; blinking PIT tag in the timing tower on the pit lap.
+- Strategy chart: pit-lap numbers under the bars removed (compound + stint length stay in the coloured bars).
+- New season-clock card: week progress ring, next race with countdown ("3 weeks to go" / pulsing RACE WEEK), phase chip, animated year rail.
+- Year plan / championship calendar: month-by-month week grid with venue codes on race weeks, testing and development markers, this week highlighted.
+- Week strip also shown on race-weekend pages.
+- Left menu keeps its scroll position when you pick a page.
+
 ## v3.7
 - Fixed: "No timed laps yet" before Q1 in championship — quick-simulated practice now runs the real session engine, so all laps are logged.
 - No more page reload / jump to top when choosing an option anywhere: screens update in place (DOM morph) and keep scroll position.

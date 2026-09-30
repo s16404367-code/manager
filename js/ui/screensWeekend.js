@@ -8,7 +8,7 @@ import { PERSONALITIES } from '../data/drivers.js';
 import { startWeekend, runPractice, runQualiSession, engineerEstimate, estimateReliability, PRACTICE_PROGRAMS, strategyContext, defaultPlans, buildRace } from '../engines/weekendEngine.js';
 import { effectiveCar, trackScore, SETUP_KEYS, SETUP_LABEL, SETUP_HINT, SETUP_GROUPS, setupQuality, setupCharacter, driverStyle } from '../engines/carModel.js';
 import { setupChanged } from '../engines/sessionEngine.js';
-import { clockCard } from './calendarUi.js';
+import { clockCard, weekMini } from './calendarUi.js';
 import { raceDue } from '../engines/calendarEngine.js';
 import { liveView, startLive, stopLive } from './screenSession.js';
 import { planOptions, labelPlans, clonePlan } from '../engines/strategyEngine.js';
@@ -124,8 +124,9 @@ screen('weekend', {
     if (wk.phase === 'race') { return `<div class="card"><h2>Race in progress</h2><button class="btn primary" data-act="go" data-arg="race">Return to pit wall →</button></div>`; }
     if (wk.phase === 'post') { return `<div class="card"><h2>Race complete</h2><button class="btn primary" data-act="go" data-arg="post">Open debrief →</button></div>`; }
     const t = trackById(wk.trackId);
+    const wm = weekMini(s);
     const body = { prep: prepView, practice: practiceView, quali: qualiView, strategy: strategyView }[wk.phase]?.(s, wk, t) || '';
-    return `<div class="pagehead"><div class="gphead"><span class="rnd">R${(s.mode === 'career' ? s.round + 1 : TRACKS.indexOf(t) + 1)}</span><div><div class="tiny muted">${esc(t.gp)} · ${esc(t.country)}</div><h1>${esc(t.name)}</h1></div></div><span class="pill">${esc(t.archetype)}</span><span class="pill">${wk.laps} laps${wk.scale > 1.05 ? ' · compressed' : ''}</span>${helpBtn('weekend')}</div>${stepper(wk.phase)}${body}`;
+    return `<div class="pagehead"><div class="gphead"><span class="rnd">R${(s.mode === 'career' ? s.round + 1 : TRACKS.indexOf(t) + 1)}</span><div><div class="tiny muted">${esc(t.gp)} · ${esc(t.country)}</div><h1>${esc(t.name)}</h1></div></div><span class="pill">${esc(t.archetype)}</span><span class="pill">${wk.laps} laps${wk.scale > 1.05 ? ' · compressed' : ''}</span>${helpBtn('weekend')}</div>${stepper(wk.phase)}${wm}${body}`;
   },
 });
 on({ beginWeekend: () => { startWeekend(S()); persist(); render(); } });

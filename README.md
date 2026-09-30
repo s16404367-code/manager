@@ -77,7 +77,7 @@ node tests/run-tests.mjs                          # headless engine tests
 - Race-day strategy check: after the first laps, the pit wall asks whether to continue with the pre-race plan, let the engineers adapt it to today's tyre wear, or switch to manual pit calls. You can switch this pause on or off in Settings.
 - Restyled HQ, management screens, tables, tabs, menus and dialogs.
 
-## v3.7
+## v3.8
 - Three-day weekend weather: Friday (practice), Saturday (qualifying) and Sunday (race) each have their own conditions, air/track temperature and wind. Practice runs in Friday's weather, so Friday's tyre data can mislead on a hotter or cooler Sunday.
 - Safety car realism: SC ~175 km/h and VSC delta speed in telemetry, no overtaking, DRS disabled during SC/VSC and for 2 laps after the restart, and a DRS ENABLED/DISABLED indicator on the race bar.
 - Map size capped (max 560px wide, ~half the screen height), the same in practice, qualifying and the race.

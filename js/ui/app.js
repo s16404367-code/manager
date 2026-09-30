@@ -95,9 +95,9 @@ export function render() {
     const inner = def.render(app.arg);
     const html = def.bare ? inner : shell(inner);
     const same = app._lastKey === viewKey() && root.firstChild;
-    const sx = window.scrollX, sy = window.scrollY;
+    const sx = window.scrollX, sy = window.scrollY; const navY = root.querySelector('.sidenav')?.scrollTop || app._navY || 0; app._navY = navY;
     if (same) morphHtml(root, html); else root.innerHTML = html;
-    app._sameRender = !!same;
+    app._sameRender = !!same; const nv = root.querySelector('.sidenav'); if (nv) nv.scrollTop = navY;
     if (same) window.scrollTo?.(sx, sy);
     def.after?.(root, app.arg);
   } catch (e) {

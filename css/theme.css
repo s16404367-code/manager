@@ -208,3 +208,63 @@ details.rdata{margin-top:.6rem}details.rdata summary{cursor:pointer;font-weight:
 .guide h3{margin:.2rem 0}.guide dl{margin:.3rem 0}.guide dt{font-weight:700;margin-top:.45rem}.guide dd{margin:0 0 0 .2rem;color:#c9d1e0}
 .guidebtn{position:fixed;right:14px;bottom:78px;z-index:50}
 @media (min-width:901px){.guidebtn{bottom:16px}}
+/* ---- v3.8 pit animation ---- */
+.pitfx{position:fixed;left:50%;bottom:14px;transform:translate(-50%,140%);z-index:10001;transition:transform .35s cubic-bezier(.2,.9,.3,1.2);pointer-events:none}
+.pitfx.show{transform:translate(-50%,0)}
+.pfxcard{min-width:340px;background:linear-gradient(135deg,#141a26,#0b0f17);border:1px solid #2a3550;border-left:6px solid var(--team);border-radius:14px;padding:.55rem .8rem;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+.pfxcard.mine{border-color:#ffd400;border-left-color:var(--team);box-shadow:0 0 0 2px rgba(255,212,0,.35),0 10px 30px rgba(0,0,0,.6)}
+.pfxhd{display:flex;align-items:center;gap:.45rem;font-size:.9rem}
+.pfxbox{background:#ffd400;color:#000;font-weight:900;padding:.05rem .45rem;border-radius:5px;letter-spacing:.08em;animation:pfxblink .5s steps(2) 4}
+@keyframes pfxblink{50%{opacity:.25}}
+.pfxstage{display:flex;align-items:center;gap:.8rem;margin-top:.45rem;position:relative}
+.pfxwheel{position:relative;width:54px;height:54px;flex:none}
+.pfxtyre{position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle,#2b2f38 0 34%,#111 35% 58%,var(--tc) 59% 67%,#111 68%);display:flex;align-items:center;justify-content:center;box-shadow:inset 0 0 0 3px #000}
+.pfxtyre b{color:var(--tc);font-weight:900;font-size:1rem;text-shadow:0 0 4px #000}
+.pfxtyre.out{animation:pfxout .9s ease-in .35s forwards}
+.pfxtyre.in{transform:translateX(140%) rotate(360deg);opacity:0;animation:pfxin .9s cubic-bezier(.2,.9,.3,1) 1.05s forwards}
+@keyframes pfxout{to{transform:translateX(-160%) rotate(-540deg);opacity:0}}
+@keyframes pfxin{to{transform:none;opacity:1}}
+.pfxtxt{font-size:.9rem;line-height:1.35}
+.pfxarrow{display:inline-block;animation:pfxarr .8s ease-in-out infinite}
+@keyframes pfxarr{50%{transform:translateX(4px)}}
+.pfxtimer{font-size:1.25rem;font-weight:800}
+.pfxgun{position:absolute;left:44px;top:-4px;width:14px;height:14px;border-radius:50%;background:radial-gradient(#fff,#ffd400 40%,transparent 70%);opacity:0;animation:pfxspark .25s ease-out .9s 4 alternate}
+@keyframes pfxspark{to{opacity:1;transform:scale(1.6)}}
+.pitpill{background:#ffd400;color:#000;border-radius:4px;padding:0 .3rem;font-size:.65rem;animation:pfxblink .6s steps(2) infinite}
+.tsrow:not(.tsaxis) .tstrack{margin-bottom:0}
+@media (prefers-reduced-motion:reduce){.pfxtyre.out,.pfxtyre.in,.pfxarrow,.pfxgun{animation:none!important;opacity:1;transform:none}.pfxtyre.out{display:none}}
+/* ---- v3.8 calendar graphics ---- */
+.clockrow{display:flex;align-items:center;gap:.8rem}
+.clockmain{flex:1;min-width:0}
+.wring .bg{fill:none;stroke:#1d2536;stroke-width:6}
+.wring .fg{fill:none;stroke:url(#none);stroke:#e10600;stroke-width:6;stroke-linecap:round;transform:rotate(-90deg);transform-origin:32px 32px;transition:stroke-dasharray .6s ease;filter:drop-shadow(0 0 3px rgba(225,6,0,.6))}
+.wring .wk{fill:#8a94a6;font-size:7px;text-anchor:middle;letter-spacing:.1em}
+.wring .wn{fill:#fff;font-size:16px;font-weight:900;text-anchor:middle}
+.nextrace{display:flex;flex-direction:column;margin-top:.25rem}.nextrace b{font-size:1.15rem;line-height:1.2}
+.cdown{flex:none;text-align:center;background:#101624;border:1px solid #26314a;border-radius:12px;padding:.4rem .6rem;min-width:74px}
+.cdown b{display:block;font-size:1.6rem;font-weight:900;line-height:1}.cdown span{font-size:.62rem;color:#8a94a6;text-transform:uppercase;letter-spacing:.06em}
+.cdown.due{border-color:#e10600;background:rgba(225,6,0,.15);animation:cdpulse 1.4s ease-in-out infinite}.cdown.due b{font-size:1.1rem;color:#ff4d4d}
+@keyframes cdpulse{50%{box-shadow:0 0 0 4px rgba(225,6,0,.25)}}
+.pill.ph-season{border-color:#e10600;color:#ff8080}.pill.ph-testing{border-color:#f5b642;color:#f5b642}.pill.ph-preseason{border-color:#a78bfa;color:#c4b5fd}.pill.ph-offseason{border-color:#6fb3ff;color:#9cc9ff}
+.yrail{position:relative;height:10px;background:#0d121c;border-radius:5px;margin:.7rem 0 .15rem;border:1px solid #1f2940}
+.yrail-fill{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:linear-gradient(90deg,#3a0b0b,#e10600);transition:width .6s ease}
+.yp{position:absolute;top:50%;width:6px;height:6px;border-radius:50%;background:#cfd6e4;transform:translate(-50%,-50%)}
+.yp.done{background:#3ddc84}.yp.next{background:#fff;width:10px;height:10px;box-shadow:0 0 0 2px #e10600}
+.yhere{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;background:#fff;transform:translate(-50%,-50%);box-shadow:0 0 0 3px rgba(255,255,255,.25);animation:yhere 1.6s ease-in-out infinite}
+@keyframes yhere{50%{box-shadow:0 0 0 7px rgba(255,255,255,0)}}
+.yrail-m{display:flex;justify-content:space-between;font-size:9px;color:#6b7589;padding:0 2px}
+.ycal{display:grid;grid-template-columns:repeat(12,1fr);gap:4px}
+.ycm{background:#0d121c;border:1px solid #1c2538;border-radius:8px;padding:3px}
+.ycm.cur{border-color:#e10600}
+.ycmh{font-size:.62rem;text-align:center;color:#8a94a6;text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px}
+.ycw{display:flex;flex-direction:column;gap:2px}
+.yc{height:16px;border-radius:4px;background:#151c2b;font-size:.56rem;display:flex;align-items:center;justify-content:center;color:#cfd6e4;font-weight:800}
+.yc.past{opacity:.45}
+.yc.race{background:#e10600;color:#fff}.yc.race.done{background:#1f7a4a;opacity:.85}.yc.race.next{background:#fff;color:#e10600;box-shadow:0 0 0 1px #e10600}
+.yc.test{background:#6b4e12}.yc.dev{background:#43307a}.yc.st,.yc.end{background:#243049}
+.yc.now{outline:2px solid #fff;outline-offset:1px;animation:yhere 1.6s ease-in-out infinite}
+.ylegend .yc.sw{display:inline-block;width:14px;height:10px;vertical-align:middle;margin-right:4px}
+@media (max-width:700px){.ycal{grid-template-columns:repeat(6,1fr)}}
+.weekmini{margin-bottom:.8rem;padding:.5rem .8rem}
+.wmn{display:inline-flex;flex-direction:column;align-items:center;background:#e10600;color:#fff;border-radius:8px;padding:.1rem .5rem;font-weight:900;font-size:1.1rem;line-height:1}
+.wmn small{font-size:.5rem;letter-spacing:.1em;font-weight:700}
