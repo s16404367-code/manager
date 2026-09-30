@@ -25,7 +25,7 @@ screen('menu', {
         <button class="menu-card" data-act="go" data-arg="help"><b>❔ How to Play</b><span class="muted small">Concepts, strategy, and the pit wall explained.</span></button>
         <button class="menu-card" data-act="go" data-arg="settings"><b>⚙️ Settings</b><span class="muted small">Speed, auto-pause, accessibility.</span></button>
       </div>
-      <p class="tiny muted" style="margin-top:2rem">Fictional teams, drivers and circuits. Not affiliated with Formula 1, the FIA or any team. Runs fully offline; saves stay in your browser.</p>
+      <p class="tiny muted" style="margin-top:2rem">Fictional teams and drivers; real circuit layouts used for identification only. Not affiliated with Formula 1, the FIA or any team. Runs fully offline; saves stay in your browser. <button class="btn sm ghost" data-act="credits">Credits &amp; legal</button></p>
     </div></div>`;
   },
 });
@@ -131,3 +131,10 @@ screen('gameover', {
     <div class="row" style="justify-content:center"><button class="btn primary" data-act="go" data-arg="newcareer">Start a new career</button><button class="btn" data-act="menu">Main menu</button></div></div>`;
   },
 });
+
+on({ credits: () => modal(`<h2>Credits & legal</h2>
+<p class="small"><b>Team Principal</b> is an unofficial, non-commercial fan game. It is not affiliated with, endorsed or sponsored by Formula 1, Formula One Management, the FIA, or any team, driver or circuit. F1, FORMULA 1 and GRAND PRIX are trademarks of Formula One Licensing B.V. Circuit names are used only to identify real venues.</p>
+<p class="small">All teams, drivers, staff and sponsors are fictional.</p>
+<p class="small"><b>Circuit outlines:</b> derived from <i>bacinger/f1-circuits</i>, © Tomislav Bacinger, MIT License.</p>
+<p class="small">Game code © the Team Principal authors, MIT License. See LICENSE, THIRD_PARTY_NOTICES.md and LEGAL.md in the project folder.</p>
+<div class="row" style="justify-content:flex-end"><button class="btn primary" data-act="modalClose">Close</button></div>`) });

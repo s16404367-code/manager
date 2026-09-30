@@ -4,11 +4,11 @@ export const ATTR_LABEL = { lowAero: 'Low-speed aero', medAero: 'Medium-speed ae
 const car = (b, m) => Object.fromEntries(CAR_ATTRS.map((k) => [k, Math.round(b + (m[k] || 0))]));
 export const TEAMS = [
   { id: 'tm_aurora', name: 'Aurora Racing', abbr: 'AUR', color: '#1e6bff', color2: '#b8d0ff', tier: 'front', philosophy: 'aero', aiStyle: 'calculated', car: car(79, { lowAero: 5, medAero: 4, highAero: 4, dragEff: -4, power: 1 }) },
-  { id: 'tm_scuderia', name: 'Scuderia Ferrox', abbr: 'FRX', color: '#e1261c', color2: '#ffd400', tier: 'front', philosophy: 'power', aiStyle: 'aggressive', car: car(79, { power: 7, dragEff: 5, tyreCare: -5, reliability: -4 }) },
+  { id: 'tm_scuderia', name: 'Scuderia Rossano', abbr: 'ROS', color: '#e1261c', color2: '#ffd400', tier: 'front', philosophy: 'power', aiStyle: 'aggressive', car: car(79, { power: 7, dragEff: 5, tyreCare: -5, reliability: -4 }) },
   { id: 'tm_silverline', name: 'Silverline GP', abbr: 'SLV', color: '#20c9b0', color2: '#d9fff8', tier: 'challenger', philosophy: 'balanced', aiStyle: 'calculated', car: car(76, { reliability: 6, puEff: 5 }) },
-  { id: 'tm_papaya', name: 'Papaya Works', abbr: 'PPY', color: '#ff8a00', color2: '#1a2a44', tier: 'challenger', philosophy: 'mech', aiStyle: 'opportunist', car: car(75, { mech: 6, traction: 5, highAero: -3 }) },
+  { id: 'tm_papaya', name: 'Ember Works', abbr: 'EMB', color: '#ff8a00', color2: '#1a2a44', tier: 'challenger', philosophy: 'mech', aiStyle: 'opportunist', car: car(75, { mech: 6, traction: 5, highAero: -3 }) },
   { id: 'tm_verdant', name: 'Verdant Motorsport', abbr: 'VRD', color: '#0f8a4f', color2: '#c8f5d8', tier: 'midfield', philosophy: 'aero', aiStyle: 'conservative', car: car(71, { highAero: 5, medAero: 3, dragEff: -4 }) },
-  { id: 'tm_alpinex', name: 'Alpinex F1', abbr: 'ALX', color: '#ff5ca8', color2: '#0b3d91', tier: 'midfield', philosophy: 'reliability', aiStyle: 'conservative', car: car(70, { reliability: 8, cooling: 4, power: -3 }) },
+  { id: 'tm_alpinex', name: 'Altitude Racing', abbr: 'ALT', color: '#ff5ca8', color2: '#0b3d91', tier: 'midfield', philosophy: 'reliability', aiStyle: 'conservative', car: car(70, { reliability: 8, cooling: 4, power: -3 }) },
   { id: 'tm_nordic', name: 'Nordic Arrow', abbr: 'NRA', color: '#7fb3ff', color2: '#ffffff', tier: 'midfield', philosophy: 'power', aiStyle: 'opportunist', car: car(70, { power: 5, dragEff: 5, lowAero: -5 }) },
   { id: 'tm_kodiak', name: 'Kodiak Racing', abbr: 'KDK', color: '#8a5a2b', color2: '#f2d7a6', tier: 'midfield', philosophy: 'ops', aiStyle: 'aggressive', car: car(68, { traction: 3, braking: 4 }) },
   { id: 'tm_haze', name: 'Haze Engineering', abbr: 'HZE', color: '#9aa3ad', color2: '#d1202f', tier: 'back', philosophy: 'develop', aiStyle: 'aggressive', car: car(64, { tyreCare: 4, reliability: -3 }) },

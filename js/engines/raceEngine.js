@@ -131,6 +131,11 @@ function processLap(race, c, t, rng) {
   const w = wearPerLap({ c: c.tyre.c, track: t, car: c.car, driver: c.drv, mode: c.mode, wetness: race.wetness, dirty: c.dirty, sc: !green, setupWear: c.setupFx.wearMult, pers: pers.wear, scale: race.scale, frontBias: c.setupFx.frontBias });
   c.tyre.wear = clamp(c.tyre.wear + w * (race.degMult || 1), 0, 100); c.tyre.age++;
   if (c.know != null) c.know = Math.min(1, c.know + 0.006 * race.scale * (1 - c.know));
+  if (c.isPlayer && c.lapsDone === Math.max(2, Math.round(3 / race.scale)) && !race.alerts.planAsk && race.cars.some((x) => x.isPlayer && !x.dnf && x.plan.stops.length > x.planIdx)) {
+    race.alerts.planAsk = true;
+    const k = race.degMult || 1; const dd = Math.round((k - 1) * 100);
+    raise(race, { type: 'plan', text: `Race-day check. Tyre wear is ${Math.abs(dd) < 4 ? 'matching Friday\'s data' : `running ~${Math.abs(dd)}% ${dd > 0 ? 'higher' : 'lower'} than practice`}; track is ${race.wetness > 0.15 ? 'wet' : 'dry'}. Continue with the pre-race strategy?` });
+  }
   if (c.isPlayer && c.lapsDone === Math.max(3, Math.round(4 / race.scale)) && Math.abs((race.degMult || 1) - 1) > 0.06) radio(race, c, (race.degMult > 1 ? `Deg is higher than Friday — about ${Math.round((race.degMult - 1) * 100)}% more wear. Consider an earlier stop.` : `Tyres holding up better than practice suggested — ~${Math.round((1 - race.degMult) * 100)}% less wear. We could extend.`));
   const m = MODE[c.mode] || MODE.normal;
   const fuelUse = (100 / race.laps) * m.fuel * (green ? 1 : 0.55);
@@ -391,6 +396,13 @@ export const actions = {
   cancelPit(race, carId) { const c = carById(race, carId); if (c) { c.pitReq = null; } },
   mode(race, carId, m) { const c = carById(race, carId); if (c && MODE[m]) c.mode = m; },
   ers(race, carId, m) { const c = carById(race, carId); if (c && ERS[m]) c.ers = m; },
+  // Re-plan remaining stops using the wear actually observed today (race.degMult vs Friday's model).
+  replan(race, carId) {
+    const c = carById(race, carId); if (!c || c.dnf || c.finished) return;
+    const k = race.degMult || 1;
+    c.plan.stops = c.plan.stops.map((st, i) => (i < c.planIdx ? st : { ...st, lap: Math.max(c.lapsDone + 1, Math.min(race.laps - 1, Math.round(c.lapsDone + (st.lap - c.lapsDone) / k))) }));
+    c.autoPlan = true; radio(race, c, `Copy, plan updated: ${c.plan.stops.slice(c.planIdx).map((x) => 'L' + x.lap + ' ' + x.c).join(', ') || 'no stops'}.`);
+  },
   auto(race, carId, v) { const c = carById(race, carId); if (c) c.autoPlan = v; },
   orders(race, carId, mateId, kind) {
     const c = carById(race, carId), m = carById(race, mateId); if (!c || !m) return;

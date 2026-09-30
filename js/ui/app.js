@@ -16,6 +16,7 @@ export function applyTheme() {
   const r = document.documentElement; const s = app.settings;
   r.style.setProperty('--fs', s.textScale || 1);
   document.body.classList.toggle('hc', !!s.highContrast);
+  document.body.classList.toggle('navc', s.navCollapsed !== false);
   const t = app.state?.teams?.[app.state.player];
   if (t) { r.style.setProperty('--team', t.color); r.style.setProperty('--team2', t.color2 || '#fff'); }
 }
@@ -58,7 +59,7 @@ function shell(inner) {
   const quick = s.mode === 'quick';
   const nav = quick ? QUICK_NAV : NAV;
   const badge = (r) => (r === 'hq' && s.pendingEvent ? '<span class="badge">!</span>' : r === 'car' && s.projects?.some((p) => p.stage === 'ready') ? '<span class="badge">●</span>' : '');
-  const side = nav.map(([g, items]) => `<div class="grp">${g}</div>` + items.map(([r, l, i]) => `<a href="#/${r}" class="${app.route === r ? 'on' : ''}"><span aria-hidden="true">${i}</span>${l}${badge(r)}</a>`).join('')).join('');
+  const side = nav.map(([g, items]) => `<div class="grp">${g}</div>` + items.map(([r, l, i]) => `<a href="#/${r}" class="${app.route === r ? 'on' : ''}"><span aria-hidden="true">${i}</span><span class="lbl">${l}</span>${badge(r)}</a>`).join('')).join('');
   const nextTrack = s.calendar[s.round] ? trackById(s.calendar[s.round]) : null;
   const bottom = (quick ? [['weekend', 'Weekend', '🏁'], ['help', 'Help', '❔'], ['settings', 'Settings', '⚙️']] : BOTTOM).map(([r, l, i]) => `<a href="#/${r}" class="${app.route === r ? 'on' : ''}"><span class="i">${i}</span>${l}</a>`).join('') + (quick ? '' : `<a href="javascript:void 0" data-act="more"><span class="i">☰</span>More</a>`);
   return `<header class="topbar">
@@ -70,11 +71,12 @@ function shell(inner) {
       <button class="btn sm ghost" data-act="fullscreen" title="Fullscreen" aria-label="Fullscreen">⛶</button>
       <button class="btn sm ghost" data-act="menu" title="Main menu" aria-label="Main menu">⏏</button>
     </div></header>
-  <div class="shell"><nav class="sidenav" aria-label="Main">${side}</nav><main id="main">${inner}</main></div>
+  <div class="shell"><nav class="sidenav" aria-label="Main"><button class="navtog" data-act="navToggle" title="${(app.settings.navCollapsed !== false) ? 'Expand menu' : 'Collapse menu'}" aria-label="Toggle menu">${(app.settings.navCollapsed !== false) ? '›' : '‹ Hide menu'}</button>${side}</nav><main id="main">${inner}</main></div>
   <nav class="bottomnav" aria-label="Mobile">${bottom}</nav>
   ${app.moreOpen ? `<div class="morepanel">${NAV.flatMap(([, it]) => it).map(([r, l, i]) => `<a href="#/${r}" data-act="closeMore">${i}<br>${l}</a>`).join('')}</div>` : ''}`;
 }
 on({
+  navToggle: () => { updateSettings({ navCollapsed: app.settings.navCollapsed === false }); render(); },
   more: () => { app.moreOpen = !app.moreOpen; render(); },
   closeMore: () => { app.moreOpen = false; },
   fullscreen: () => { const d = document; if (!d.fullscreenElement) (d.documentElement.requestFullscreen?.() || d.documentElement.webkitRequestFullscreen?.())?.catch?.(() => toast('Fullscreen not supported here', 'warn')); else d.exitFullscreen?.(); },

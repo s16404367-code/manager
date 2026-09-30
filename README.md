@@ -2,7 +2,7 @@
 
 An F1-inspired **Team Principal** simulator. It runs entirely in the browser as a static site. There's no backend, login or build step, and it plays offline. You don't drive the car: you run the factory, the engineers, the drivers, development, the finances and the pit wall.
 
-> Fictional teams, drivers and circuits. Not affiliated with Formula 1, the FIA or any team.
+> Fictional teams and drivers. Real circuit names/layouts are used only to identify venues. Unofficial fan project — not affiliated with, endorsed or sponsored by Formula 1, Formula One Management, the FIA, any team, driver or circuit. See LEGAL.md.
 
 ## Play locally
 ES modules need an HTTP server (browsers won't load `file://` modules):
@@ -68,3 +68,11 @@ node tests/run-tests.mjs                          # headless engine tests
 - Race-day tyre wear differs from Friday (temperature, rubber, rain); the engineer radios the difference early on.
 - New weather forecast cards with icons, a legend and chance of rain per lap window.
 - Pit lane drawn on every map, with garage cars parked in the pit boxes; clearer SC/VSC car and banner. Wider timing tower.
+
+## v3.3
+- Legal: `LICENSE` (MIT, your code), `THIRD_PARTY_NOTICES.md` (circuit data credit + dev-tool licences), `LEGAL.md` (non-affiliation/trademark disclaimer), plus an in-game **Credits & legal** button on the main menu. Team/driver names that resembled real ones were renamed.
+- A single telemetry panel: tap any car in the timing table (yours or a rival's) in practice, qualifying and the race.
+- Larger map in practice and qualifying.
+- The side menu is collapsed by default; use the › / ‹ button to open or close it.
+- Race-day strategy check: after the first laps, the pit wall asks whether to continue with the pre-race plan, let the engineers adapt it to today's tyre wear, or switch to manual pit calls. You can switch this pause on or off in Settings.
+- Restyled HQ, management screens, tables, tabs, menus and dialogs.

@@ -19,7 +19,7 @@ export function liveView(s, wk, t) {
   <div class="live" id="livegrid">
     <div class="card c-tower tower"><div class="row"><h4 style="margin:0">Timing — ${sessName(sess)}</h4><span class="sp"></span><span class="tiny muted"><span class="sc purple">■</span> overall best <span class="sc pb">■</span> personal best</span></div><div id="ltower"></div></div>
     <div class="c-map"><div class="mapwrap">${mapSvg(t, 'lmap')}${sectorLegend()}</div>
-      <div class="telepair"><div class="card tight"><h4 style="margin:0 0 .4rem">Telemetry A <span class="tiny muted" style="text-transform:none;letter-spacing:0">— tap any car</span></h4>${teleHtml(t, 'ltele')}</div><div class="card tight"><h4 style="margin:0 0 .4rem">Telemetry B <span class="tiny muted" style="text-transform:none;letter-spacing:0">— team-mate</span></h4>${teleHtml(t, 'ltele2')}</div></div></div>
+      <div class="card tight" style="margin-top:.8rem"><h4 style="margin:0 0 .4rem">Telemetry <span class="tiny muted" style="text-transform:none;letter-spacing:0">— tap any car in the timing table (yours or a rival)</span></h4>${teleHtml(t, 'ltele')}</div></div>
     <div class="c-ctrl"><div id="lctrl"></div><div class="card tight" style="margin-top:.8rem"><h4>Session feed</h4><div class="feed" id="lfeed"></div></div></div>
   </div>`;
 }
