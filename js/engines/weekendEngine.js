@@ -8,6 +8,7 @@ import { generateWeather, forecast } from './weatherEngine.js';
 import { planOptions, labelPlans, clonePlan } from './strategyEngine.js';
 import { wearPerLap, COMPOUNDS, wetPenalty } from './tyreEngine.js';
 import { createRace } from './raceEngine.js';
+import { maxWear, ensurePC } from './components.js';
 import { deptQ, facLvl, pitCrew, forecastAccuracy, DIFFICULTY, teamDrivers, POINTS } from './world.js';
 
 export function startWeekend(state) {
@@ -26,7 +27,7 @@ export function startWeekend(state) {
     trackId, round: state.round, seed, laps, scale, weather, qWet, phase: 'prep', forecastAcc: acc,
     forecast: forecast(weather, laps, acc, rng.fork(3)), qForecast: Math.round(clamp(acc * (qWet > 0 ? 1 : 0) + (1 - acc) * rng.next(), 0, 1) * 100),
     opt: {}, noise: {}, setups: {}, knowledge: {}, tyreKnow: 0.15 + facLvl(pt, 'simulator') * 0.05, qualiPrep: {}, relBurn: {},
-    practice: { done: 0, total: state.mode === 'quick' ? 1 : 3, reports: [] },
+    know: {}, raceDeg: 1, practice: { done: 0, total: state.mode === 'quick' ? 1 : 3, reports: [] },
     quali: { session: 0, results: [], eliminated: [], plans: {} }, grid: null, strategy: {}, fuel: {}, race: null, result: null,
   };
   for (const team of Object.values(state.teams)) {
@@ -42,6 +43,10 @@ export function startWeekend(state) {
       }
     });
   }
+  // Race-day tyre behaviour can differ from Friday: temperature swing, track rubbering, wind, rain washing rubber away.
+  const rainy = weather.wet.some((w) => w > 0.12);
+  wk.raceDeg = clamp(1 + rng.normal(0, 0.11) + (weather.trackTemp - 35) * 0.004 + (rainy ? rng.range(-0.08, 0.1) : 0), 0.78, 1.3);
+  for (const did of pt.drivers) { wk.know[did] = clamp(0.25 + facLvl(pt, 'simulator') * 0.05 + (state.drivers[did].age > 27 ? 0.1 : 0), 0, 0.6); ensurePC(pt); }
   state.setupPenalty = 0;
   state.weekend = wk;
   return wk;
@@ -99,11 +104,21 @@ export function applyProgram(state, did, prog, rng, mult = 1, lines = []) {
     if (prog === 'reliability') { wk.relBurn[did] = true; lines.push({ did, prog, text: `${d.name} completed reliability checks. ${pt.car.reliability < 65 ? 'Engineers flagged a marginal hydraulic pressure trace.' : 'No issues found.'}` }); }
   return lines;
 }
+// Track/car understanding grows with laps run (driver + engineers). Worth up to ~0.3s/lap.
+export function gainKnow(state, did, laps) {
+  const wk = state.weekend; if (!wk.know || wk.know[did] == null) return;
+  const d = state.drivers[did]; const k = wk.knowledge[did];
+  const rate = 0.012 * (0.7 + d.fb / 160);
+  wk.know[did] = clamp(wk.know[did] + rate * laps * (1 - wk.know[did]), 0, 1);
+  if (k) for (const key of SETUP_KEYS) k[key] = clamp(k[key] + 0.004 * laps, 0, 0.97);
+}
+export const AI_KNOW = 0.62;
+export function knowOf(state, did) { const wk = state.weekend; return state.drivers[did].teamId === state.player ? (wk.know?.[did] ?? AI_KNOW) : AI_KNOW; }
 export function runPractice(state, programs) {
   const wk = state.weekend;
   const rng = new RNG((wk.seed + 101 * (wk.practice.done + 1)) >>> 0);
   const pt = state.teams[state.player]; const lines = [];
-  for (const did of pt.drivers) applyProgram(state, did, programs[did] || 'setup', rng, 1, lines);
+  for (const did of pt.drivers) { applyProgram(state, did, programs[did] || 'setup', rng, 1, lines); gainKnow(state, did, 10); }
   wk.practice.done++;
   wk.practice.reports.push({ session: wk.practice.done, lines });
   return lines;
@@ -119,7 +134,7 @@ export function qualiLap(state, team, slot, did, t, wet, rng, plan) {
   const fx = team.isPlayer ? setupEffects(wk.setups[did], wk.opt[did], t) : { topSpeed: 0 };
   const tyre = wet > 0.6 ? 'W' : wet > 0.16 ? 'I' : 'S';
   const chosen = team.isPlayer && plan?.tyre ? plan.tyre : tyre;
-  let lt = t.baseLap + perf + (100 - d.pace) * 0.035 + (1 - sq) * 0.9 - (wk.qualiPrep[did] || 0) + wetPenalty(chosen, wet) + wet * 6 + wet * (100 - d.wet) * 0.04 - fx.topSpeed * t.drag * 2 + 5 * 0.032 - 0.45;
+  let lt = t.baseLap - knowOf(state, did) * 0.3 + AI_KNOW * 0.3 + perf + (100 - d.pace) * 0.035 + (1 - sq) * 0.9 - (wk.qualiPrep[did] || 0) + wetPenalty(chosen, wet) + wet * 6 + wet * (100 - d.wet) * 0.04 - fx.topSpeed * t.drag * 2 + 5 * 0.032 - 0.45;
   const push = plan?.push || 'normal';
   lt += { safe: 0.08, normal: 0, max: -0.12 }[push];
   const mistakeP = { safe: 0.03, normal: 0.07, max: 0.15 }[push] * (1 + wet) * (1 + (100 - d.cons) / 50);
@@ -225,20 +240,18 @@ export function buildRace(state) {
       entries.push({
         driverId: did, teamId: team.id, name: d.name, short: d.name.split(' ').slice(-1)[0], abbr: team.abbr, color: team.color,
         isPlayer: team.isPlayer, slot, grid: wk.grid.indexOf(did) + 1, drv: d, car, perf, setupQ, setupFx, plan,
-        crew: pitCrew(team), relMult: relFac * (wk.relBurn[did] ? 0.88 : 1), fuelLoad: team.isPlayer ? wk.fuel[did] || 1 : 1, aiStyle: team.aiStyle,
+        know: knowOf(state, did), crew: pitCrew(team), relMult: relFac * (wk.relBurn[did] ? 0.88 : 1), fuelLoad: team.isPlayer ? wk.fuel[did] || 1 : 1, aiStyle: team.aiStyle,
       });
     });
   }
   entries.sort((a, b) => a.grid - b.grid);
-  wk.race = createRace({ track: t, laps: wk.laps, entries, weather: wk.weather, seed: rng.int(1, 2 ** 31), scale: wk.scale, difficulty: state.difficulty });
+  wk.race = createRace({ track: t, laps: wk.laps, entries, weather: wk.weather, seed: rng.int(1, 2 ** 31), scale: wk.scale, difficulty: state.difficulty, degMult: wk.raceDeg || 1 });
   wk.phase = 'race';
   return wk.race;
 }
 function relMultiplier(state, team, did) {
   const slot = team.drivers.indexOf(did);
-  const used = team.pu?.[slot] || 0;
-  const allowed = Math.max(2, Math.ceil(state.calendar.length / 4));
-  const over = used > allowed ? 1.25 : 1;
+  const over = 1 + Math.pow(maxWear(team, slot) / 100, 2) * 1.2; // worn PU/gearbox parts fail more often
   const fat = 1 + (team.depts.rel.fatigue + team.depts.ops.fatigue) * 0.004;
   return clamp((1.1 - deptQ(team, 'rel') * 0.004 - facLvl(team, 'relLab') * 0.03) * over * fat, 0.55, 1.6);
 }

@@ -1,9 +1,11 @@
 // Career systems: development, manufacturing, finance, staff, drivers, sponsors, board, AI, events, regulations, seasons.
+import { wearRace, fitNew, resetSeason, COMP } from './components.js';
 import { RNG, hashStr } from '../sim/rng.js';
 import { clamp, avg, money, round } from '../sim/util.js';
 import { CAR_ATTRS, ATTR_LABEL, PHILOSOPHIES, PROFILES } from '../data/teams.js';
 import { PROJECTS, APPROACHES, FACILITIES, SPONSOR_POOL, REGULATIONS, EVENTS, ATR_TABLE, COST_CAP, DEPARTMENTS, OBJ_TEXT } from '../data/content.js';
 import { DRIVERS } from '../data/drivers.js';
+import { trackById } from '../data/tracks.js';
 import { deptQ, facLvl, correlationQuality, genStaff, genStaffMarket, driverSalary, driverRating, DIFFICULTY, POINTS, pickCalendar, seasonObjectives } from './world.js';
 
 const rngOf = (state, salt) => { const r = new RNG((state.rngS ^ hashStr(String(salt))) >>> 0); return r; };
@@ -65,14 +67,14 @@ export function applyRaceResult(state) {
   for (const d of Object.values(state.drivers)) if (d.teamId !== state.player) d.morale = clamp(d.morale + r.range(-2, 2), 30, 95);
   // AI memory: undercuts suffered from player
   if (state.mode !== 'career') { state.phase = 'quickDone'; commit(state, r); return; }
-  // PU usage
+  // PU & gearbox component wear (forced replacements may cost grid places)
   P.drivers.forEach((did, slot) => {
     const c = race.cars.find((x) => x.id === did);
-    const fresh = (c?.dnf && /Power unit/.test(c.dnf)) || (state.round % 4 === 3);
-    if (fresh || P.pu[slot] === 0) P.pu[slot]++;
-    const allowed = Math.max(2, Math.ceil(state.calendar.length / 4));
-    if (P.pu[slot] > allowed && fresh) { state.gridPenalties = { ...(state.gridPenalties || {}), [did]: 5 }; note(state, 'warn', `${state.drivers[did].name} exceeds the PU allocation — 5-place grid penalty next race.`); }
+    const forced = wearRace(state, P, slot, trackById(wk.trackId), state.raceLength || 0.35, c?.dnf || '');
+    for (const k of forced) { const pen = fitNew(state, P, slot, k); note(state, pen ? 'warn' : 'info', `${state.drivers[did].name}: ${COMP[k].name} worn out and replaced${pen ? ` — beyond the allocation, ${pen}-place grid penalty next race` : ''}.`); }
   });
+  // driver training programmes
+  for (const did of P.drivers) { const d = state.drivers[did]; const tr = d.training; if (!tr) continue; for (const k of TRAINING[tr.k].stats) d[k] = clamp(round(d[k] + TRAINING[tr.k].gain * (d[k] < d.pot ? 1 : 0.3), 1), 40, 99); tr.left--; if (tr.left <= 0) { note(state, 'good', `${d.name} completed ${TRAINING[tr.k].label}.`); d.training = null; } }
   // finance
   const diff = diffOf(state);
   const pos = teamPos(state, state.player);
@@ -356,6 +358,21 @@ export function negotiateSponsor(state, id) {
 }
 
 // ---------------- Drivers ----------------
+export const TRAINING = {
+  sim: { label: 'Simulator programme', stats: ['pace', 'fb'], gain: 0.6, cost: 0.5e6, races: 3, desc: 'Pace and technical feedback.' },
+  fitness: { label: 'Fitness & endurance', stats: ['cons'], gain: 0.9, cost: 0.35e6, races: 3, desc: 'Consistency, fewer late-race mistakes.' },
+  wet: { label: 'Wet-weather sessions', stats: ['wet'], gain: 1.1, cost: 0.4e6, races: 3, desc: 'Confidence in rain.' },
+  tyre: { label: 'Tyre-management clinic', stats: ['tyre'], gain: 1.0, cost: 0.4e6, races: 3, desc: 'Lower wear, longer stints.' },
+  craft: { label: 'Racecraft coaching', stats: ['craft', 'start'], gain: 0.6, cost: 0.55e6, races: 3, desc: 'Overtaking, defending and starts.' },
+};
+export function startTraining(state, did, k) {
+  const d = state.drivers[did]; const T = TRAINING[k]; if (!T) return { ok: false, msg: 'Unknown programme' };
+  if (d.training) return { ok: false, msg: `${d.name} is already in a programme.` };
+  if (pt(state).cash < T.cost) return { ok: false, msg: 'Not enough cash.' };
+  ledger(state, 'Drivers', -T.cost, `${T.label}: ${d.name}`); d.training = { k, left: T.races };
+  return { ok: true, msg: `${d.name} started ${T.label}.` };
+}
+export function fitComponent(state, slot, key) { const pen = fitNew(state, pt(state), slot, key); ledger(state, 'Technical', -0.25e6, `New ${COMP[key].name}`); return pen; }
 export function growDriver(d, coachQ, r, rate = 0.25) {
   const ageF = d.age < 25 ? 1 : d.age < 30 ? 0.5 : d.age < 34 ? 0 : -0.8;
   for (const k of ['pace', 'craft', 'cons', 'tyre', 'wet', 'fb']) {
@@ -483,7 +500,7 @@ export function startNextSeason(state) {
       }
       t.car[k] = clamp(round(t.car[k], 1), 30, 105);
     }
-    t.points = 0; t.results = []; t.pu = [0, 0]; t.budgetSpent = 0;
+    t.points = 0; t.results = []; t.pu = [0, 0]; resetSeason(t); t.budgetSpent = 0;
   }
   if (reg) note(state, 'warn', `New regulations in force: ${reg.name}.`);
   // drivers: age, growth, contracts

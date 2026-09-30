@@ -6,7 +6,8 @@ import { clamp } from '../sim/util.js';
 import { trackById, lapProfile } from '../data/tracks.js';
 import { effectiveCar, trackScore, carDeficitSec, setupQuality, setupEffects } from './carModel.js';
 import { COMPOUNDS, wetPenalty } from './tyreEngine.js';
-import { aiSetupQ, applyProgram, commitQuali, PRACTICE_PROGRAMS } from './weekendEngine.js';
+import { aiSetupQ, applyProgram, commitQuali, PRACTICE_PROGRAMS, gainKnow, knowOf, AI_KNOW } from './weekendEngine.js';
+import { maxWear, ensurePC, COMP } from './components.js';
 
 export const Q_LEN = [720, 600, 480];
 export const FP_LEN = 1800; // 30 min of session clock per practice session (compressed)
@@ -20,7 +21,7 @@ function carBase(state, did, wet, tyre) {
   const rng = new RNG((wk.seed ^ (did.length * 7919 + slot * 31 + d.name.charCodeAt(0))) >>> 0);
   const sq = team.isPlayer ? setupQuality(wk.setups[did], wk.opt[did]) : aiSetupQ(team, rng);
   const fx = team.isPlayer ? setupEffects(wk.setups[did], wk.opt[did], t) : { topSpeed: 0, mistakeMult: 1 };
-  const lt = t.baseLap + perf + (100 - d.pace) * 0.035 + (1 - sq) * 0.9 - (wk.qualiPrep[did] || 0) + wetPenalty(tyre, wet) + wet * 6 + wet * (100 - d.wet) * 0.04 - fx.topSpeed * t.drag * 2 + 0.16 - 0.45 + (COMPOUNDS[tyre]?.off || 0);
+  const lt = t.baseLap - (knowOf(state, did) - AI_KNOW) * 0.3 + perf + (100 - d.pace) * 0.035 + (1 - sq) * 0.9 - (wk.qualiPrep[did] || 0) + wetPenalty(tyre, wet) + wet * 6 + wet * (100 - d.wet) * 0.04 - fx.topSpeed * t.drag * 2 + 0.16 - 0.45 + (COMPOUNDS[tyre]?.off || 0);
   return { lt, sq, fx };
 }
 
@@ -69,17 +70,35 @@ function startLap(state, sess, c, kind) {
     if (rng.chance(mP)) { time += rng.range(0.5, 2); notes.push('mistake'); }
     if (rng.chance(0.03 + (c.push === 'max' ? 0.03 : 0) + t.kerb * 0.02)) notes.push('deleted');
   }
+  // reliability: a failure can strike mid-lap (ERS/battery, engine, hydraulics, gearbox)
+  const team = state.teams[c.teamId]; const car = effectiveCar(team, team.drivers.indexOf(c.did));
+  const wearF = team.isPlayer ? 1 + maxWear(team, team.drivers.indexOf(c.did)) / 70 : 1;
+  const failP = 0.0045 * Math.pow(clamp(1.25 - car.reliability / 100, 0.1, 1), 1.3) * wearF * (0.7 + 0.6 * t.eng) * (state.weekend.relBurn?.[c.did] ? 0.85 : 1);
+  let fail = null;
+  if (rng.chance(failP)) { const ty = rng.pick([['ERS', 'ERS / battery fault'], ['ICE', 'Engine (ICE) issue'], ['HYD', 'Hydraulic leak'], ['GB', 'Gearbox problem']]); fail = { at: rng.range(0.15, 0.9), key: ty[0], text: ty[1], repair: sess.kind === 'quali' ? rng.range(200, 700) : rng.range(420, 1300) }; }
   const lapLen = kind === 'push' ? time : time * (kind === 'out' ? OUT_K : kind === 'in' ? IN_K : COOL_K);
   // Split into sectors via the speed profile, with a little per-sector noise
   const prof = lapProfile(t); const f1 = prof.sectorTf[0], f2 = prof.sectorTf[1];
   const w = [f1, f2 - f1, 1 - f2].map((x) => x * (1 + rng.normal(0, 0.006)));
   const sw = w[0] + w[1] + w[2]; const s = w.map((x) => (x / sw) * lapLen);
-  c.st = 'track'; c.kind = kind; c.lapStart = sess.clock; c.lapLen = lapLen; c.cur = { time: lapLen, s, notes, kind };
+  c.st = 'track'; c.kind = kind; c.lapStart = sess.clock; c.lapLen = lapLen; c.cur = { time: lapLen, s, notes, kind, fail };
+  if (fail) c.lapLen = lapLen * fail.at;
   c.lastS = [null, null, null]; c.sColor = ['', '', ''];
 }
 
 function finishLap(state, sess, c, lines) {
   const cur = c.cur; const t = trackById(state.weekend.trackId);
+  if (cur.fail) {
+    const f = cur.fail; c.st = 'garage'; c.cur = null; c.runPush = 0; c.pushLeft = 0; c.boxReq = false; c.go = false;
+    c.busyUntil = sess.clock + f.repair; c.until = c.isPlayer ? 1e9 : c.busyUntil + 30; c.fails = (c.fails || 0) + 1;
+    const team = state.teams[c.teamId];
+    if (team.isPlayer && COMP[f.key]) { const pc = ensurePC(team)[team.drivers.indexOf(c.did)][f.key]; pc.wear = Math.min(100, pc.wear + 10); }
+    const missing = c.busyUntil > sess.len;
+    sess.log.push({ t: sess.clock, text: `⚠️ ${c.name} stops on track — ${f.text}. ${missing ? 'Repair will take beyond the end of the session.' : `Repair ~${Math.round(f.repair / 60)} min.`}`, sev: 'bad', pl: c.isPlayer });
+    return;
+  }
+  if (c.isPlayer && sess.kind === 'practice') gainKnow(state, c.did, cur.kind === 'push' ? 1 : 0.4);
+  if (c.isPlayer && sess.kind === 'quali') gainKnow(state, c.did, 0.3);
   if (cur.kind === 'push') {
     c.runPush++; c.pushLeft--;
     const deleted = cur.notes.includes('deleted');
@@ -151,7 +170,7 @@ export function advanceSession(state, target) {
     if (!sess.flag && sess.clock >= sess.len) { sess.flag = true; sess.log.push({ t: sess.len, text: '🏁 Chequered flag — laps already started may be completed.', sev: 'info' }); }
     for (const c of sess.cars) {
       if (c.st === 'garage' && !sess.flag) {
-        const ready = c.isPlayer ? c.go && sess.clock >= (c.busyUntil || 0) : sess.clock >= c.until;
+        const ready = c.isPlayer ? c.go && sess.clock >= (c.busyUntil || 0) : sess.clock >= c.until && sess.clock >= (c.busyUntil || 0);
         if (ready) {
           c.go = false; c.pushLeft = c.isPlayer ? c.plannedPush : sess.kind === 'quali' ? (rngOf(sess).chance(0.35) ? 2 : 1) : Math.round(rngOf(sess).range(3, 9));
           if (!c.isPlayer && sess.kind === 'practice') c.prog = 'setup';

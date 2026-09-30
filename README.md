@@ -57,3 +57,14 @@ unzip team-principal-v3.1.zip -d . && cd f1tp   # if you uploaded the zip
 python3 -m http.server 8080                      # then open the forwarded port 8080 (Ports tab → globe icon)
 node tests/run-tests.mjs                          # headless engine tests
 ```
+
+## v3.2
+- Two telemetry panels (A: any car you tap, B: your team-mate) in practice, qualifying and the race. Taps are registered on press, so live refreshes can't swallow them.
+- Speed buttons (1×/3×/9×/pause) respond to a single tap, and your choice is remembered.
+- Track knowledge grows with laps run in practice, qualifying and the race; it is worth up to ~0.3s/lap and sharpens setup estimates.
+- Reliability failures in practice and qualifying (ERS/battery, engine, hydraulics, gearbox) stop the car and mean a repair in the garage, sometimes for the rest of the session.
+- Power-unit and gearbox pool per car (Car → Power units): parts wear each race, worn parts fail more, and extra parts cost 10 then 5 grid places.
+- Driver training programmes (Drivers page), paid from the season purse. The Car page shows the purse, cost-cap headroom and R&D slots.
+- Race-day tyre wear differs from Friday (temperature, rubber, rain); the engineer radios the difference early on.
+- New weather forecast cards with icons, a legend and chance of rain per lap window.
+- Pit lane drawn on every map, with garage cars parked in the pit boxes; clearer SC/VSC car and banner. Wider timing tower.

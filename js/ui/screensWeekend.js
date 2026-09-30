@@ -28,10 +28,12 @@ function fieldRank(s, t) {
   rows.sort((a, b) => b.score - a.score);
   return rows.findIndex((r) => r.id === s.player) + 1;
 }
+const WX = (p) => p < 15 ? ['☀️', 'Dry', '#f5b642'] : p < 35 ? ['🌤️', 'Mostly dry', '#c9b35a'] : p < 55 ? ['🌦️', 'Showers possible', '#6fb3ff'] : p < 75 ? ['🌧️', 'Rain likely', '#3b82f6'] : ['⛈️', 'Heavy rain', '#6d5bff'];
 function forecastStrip(wk) {
-  return `<div class="wxstrip" title="Rain probability per lap window">${wk.forecast.map((f) => `<i style="background:rgba(74,163,255,${0.08 + f.prob / 110})" title="Laps ${f.from}-${f.to}: ${f.prob}% ±${f.unc}%"></i>`).join('')}</div>
-  <div class="row tiny muted"><span>Lap 1</span><span class="sp"></span><span>Lap ${wk.laps}</span></div>
-  <div class="small">${wk.forecast.filter((f) => f.prob >= 35).length ? `Rain risk: ${wk.forecast.filter((f) => f.prob >= 35).map((f) => `L${f.from}–${f.to} (${Math.max(0, f.prob - f.unc)}–${Math.min(100, f.prob + f.unc)}%)`).join(', ')}` : 'Mostly dry expected.'} <span class="muted">Forecast confidence: ${wk.forecastAcc > 0.8 ? 'high' : wk.forecastAcc > 0.6 ? 'moderate' : 'low'}.</span></div>`;
+  const conf = wk.forecastAcc > 0.8 ? 'high' : wk.forecastAcc > 0.6 ? 'moderate' : 'low';
+  return `<div class="wxcards">${wk.forecast.map((f) => { const [ic, lab, col] = WX(f.prob); return `<div class="wxc" style="border-top-color:${col}" title="Laps ${f.from}–${f.to}: ${lab}, ${f.prob}% ±${f.unc}%"><div class="wxi">${ic}</div><b>${f.prob}%</b><span class="tiny muted">L${f.from}–${f.to}</span></div>`; }).join('')}</div>
+  <div class="wxlegend tiny">${[5, 25, 45, 65, 85].map((p) => { const [ic, lab, col] = WX(p); return `<span><i style="background:${col}"></i>${ic} ${lab}</span>`; }).join('')}</div>
+  <div class="small" style="margin-top:.3rem">${wk.forecast.filter((f) => f.prob >= 35).length ? `<b>Rain risk:</b> ${wk.forecast.filter((f) => f.prob >= 35).map((f) => `laps ${f.from}–${f.to} (${Math.max(0, f.prob - f.unc)}–${Math.min(100, f.prob + f.unc)}%)`).join(', ')}` : '☀️ <b>Dry race expected.</b>'} <span class="muted">Percent = chance of rain in that lap window. Forecast confidence: ${conf}.</span></div>`;
 }
 
 function meters(setup, did) {
@@ -50,7 +52,7 @@ function setupPanel(s, wk) {
     const shownQ = info >= 1 ? `${Math.round(qEst * 100)}%` : qEst > 0.9 ? 'Excellent' : qEst > 0.78 ? 'Good' : qEst > 0.6 ? 'Compromised' : 'Poor';
     const lc = live?.cars.find((c) => c.did === did); const locked = lc && lc.st === 'track';
     const st = driverStyle(d); const styleTxt = st > 0.3 ? 'prefers a pointy, oversteery car' : st < -0.3 ? 'prefers a stable, understeery car' : 'is comfortable with a neutral balance';
-    return `<div class="card setupcard"><div class="row"><span class="sw" style="background:${pt.color}"></span><h3 style="margin:0">${esc(d.name)}</h3>${pill(PERSONALITIES[d.pers].label)}<span class="sp"></span><span class="small muted">Engineer confidence <b>${conf}%</b></span></div>
+    return `<div class="card setupcard"><div class="row"><span class="sw" style="background:${pt.color}"></span><h3 style="margin:0">${esc(d.name)}</h3>${pill(PERSONALITIES[d.pers].label)}<span class="sp"></span><span class="small muted">Engineer confidence <b>${conf}%</b> · Track knowledge <b>${Math.round((wk.know?.[did] ?? 0.6) * 100)}%</b></span></div>
     <div class="small" style="margin:.35rem 0">Driver-reported feel: <b>${shownQ}</b> ${helpBtn('setup')} <span class="muted">· ${esc(d.name.split(' ').slice(-1)[0])} ${styleTxt}.</span></div>
     ${locked ? '<div class="alert warn small">Car is on track — setup changes only in the garage.</div>' : live ? `<div class="tiny muted">Each change in the garage costs ~30s of session time.</div>` : ''}
     <div class="setup-grid"><div>${SETUP_GROUPS.map(([g, keys]) => `<div class="sgroup"><div class="sgh">${g}</div>${keys.map((key) => `<div class="srow"><div class="row small"><span title="${esc(SETUP_HINT[key])}">${SETUP_LABEL[key]}</span><span class="sp"></span><span class="muted tiny">est. ${est[key]}</span><b class="mono sval">${cur[key]}</b></div>

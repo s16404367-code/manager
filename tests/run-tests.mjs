@@ -127,6 +127,20 @@ for (let i = 0; i < 6; i++) {
   ok(s.weekend.quali.results.every((r) => r.every((x) => Number.isFinite(x.time))), 'quali times finite');
   const js = JSON.parse(JSON.stringify(s)); ok(!validate(js).length, 'state valid after live sessions');
 }
+// ---- v3.2: components, training, knowledge, race-day deg ----
+{
+  const cw = createWorld({ mode: 'career', seed: 99, difficulty: 'standard', seasonLength: 8, raceLength: 0.25, custom: { name: 'T2', abbr: 'TTT', color: '#0f0', color2: '#000', profile: 'midfield', philosophy: 'balanced', driverIds: ['drv_fa1', 'drv_fa3'] } });
+  const P = cw.teams[cw.player]; const did = P.drivers[0];
+  ok(C.startTraining(cw, did, 'wet').ok, 'training starts'); const w0 = cw.drivers[did].wet;
+  let pens = 0; for (let i = 0; i < 6; i++) pens += C.fitComponent(cw, 0, 'ICE');
+  ok(pens === 10 + 5 * 4, 'PU penalties 10 then 5: ' + pens);
+  ok(cw.gridPenalties[did] === pens, 'penalty accumulated');
+  runRace(cw, true); C.applyRaceResult(cw);
+  ok(cw.drivers[did].wet > w0, 'training improved wet skill');
+  ok(Number.isFinite(cw.teams[cw.player].pc[1].GB.wear) && cw.teams[cw.player].pc[1].GB.wear > 0, 'gearbox wears');
+  W.startWeekend(cw); ok(cw.weekend.raceDeg >= 0.78 && cw.weekend.raceDeg <= 1.3, 'race deg factor range');
+  const k0 = cw.weekend.know[did]; W.runPractice(cw, {}); ok(cw.weekend.know[did] > k0, 'practice raises track knowledge');
+}
 const text = JSON.stringify({ state: career });
 const loaded = repair(migrate(JSON.parse(text).state));
 ok(!validate(loaded).length, 'save round-trip valid');

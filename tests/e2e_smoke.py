@@ -24,13 +24,13 @@ with sync_playwright() as p:
         click(page, '[data-act=toPractice]'); click(page, '[data-act=liveFP]')
         for _ in range(2):
             if page.locator('[data-act=liveOut]:not([disabled])').count(): page.locator('[data-act=liveOut]:not([disabled])').first.click(); page.wait_for_timeout(300)
-        click(page, '[data-act=liveSpeed][data-arg=vfast]'); page.wait_for_timeout(3500); shot(page, f'{tag}_04_practice_live')
+        click(page, '[data-tap=liveSpeed][data-arg=vfast]'); page.wait_for_timeout(3500); shot(page, f'{tag}_04_practice_live')
         page.locator('input[data-input=setup]').last.fill('7'); page.wait_for_timeout(100)
         click(page, '[data-act=liveSkip]'); click(page, '[data-act=modalOk]'); click(page, '[data-act=liveCommit]'); shot(page, f'{tag}_04b_practice_report')
         click(page, '[data-act=toQuali]'); click(page, '[data-act=liveQ]')
         for _ in range(2):
             if page.locator('[data-act=liveOut]:not([disabled])').count(): page.locator('[data-act=liveOut]:not([disabled])').first.click(); page.wait_for_timeout(300)
-        click(page, '[data-act=liveSpeed][data-arg=vfast]'); page.wait_for_timeout(4000); shot(page, f'{tag}_05a_quali_live')
+        click(page, '[data-tap=liveSpeed][data-arg=vfast]'); page.wait_for_timeout(4000); shot(page, f'{tag}_05a_quali_live')
         click(page, '[data-act=liveSkip]'); click(page, '[data-act=modalOk]'); click(page, '[data-act=liveCommit]')
         for i in range(2): click(page, '[data-act=runQuali]')
         shot(page, f'{tag}_05_quali')
@@ -39,11 +39,11 @@ with sync_playwright() as p:
         # handle any decision modal then fast
         for _ in range(3):
             if page.locator('[data-act=dclose]').count(): click(page, '[data-act=dclose]')
-        if page.locator('[data-act=rspeed][data-arg=vfast]').count(): click(page, '[data-act=rspeed][data-arg=vfast]')
+        if page.locator('[data-tap=rspeed][data-arg=vfast]').count(): click(page, '[data-tap=rspeed][data-arg=vfast]')
         page.wait_for_timeout(3000)
         if page.locator('[data-act=dclose]').count(): shot(page, f'{tag}_07b_decision'); click(page, '[data-act=dclose]')
         shot(page, f'{tag}_08_race_fast')
-        click(page, '[data-act=rpause]') if page.locator('[data-act=rpause]').count() else None
+        click(page, '[data-tap=rpause]') if page.locator('[data-tap=rpause]').count() else None
         for _ in range(4):
             if page.locator('[data-act=dclose]').count(): click(page, '[data-act=dclose]'); page.wait_for_timeout(200)
         if page.locator('[data-act=rskip]').count():

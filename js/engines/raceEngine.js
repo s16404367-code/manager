@@ -26,7 +26,7 @@ export function createRace(ctx) {
     trackId: ctx.track.id, laps: ctx.laps, scale: ctx.scale || 1, time: 0, lap: 1, rngS: rng.s,
     weather: ctx.weather, wetness: ctx.weather.wet[0], sc: { state: 'none', lapsLeft: 0, count: 0, vscCount: 0 },
     cars: [], log: [], radio: [], pending: [], chequered: false, finished: false, lineTimes: [0],
-    difficulty: ctx.difficulty || 'standard', lapChart: [], alerts: {}, stats: { overtakes: 0 },
+    degMult: ctx.degMult || 1, difficulty: ctx.difficulty || 'standard', lapChart: [], alerts: {}, stats: { overtakes: 0 },
   };
   const t = ctx.track;
   const fuelStart = 100;
@@ -34,7 +34,7 @@ export function createRace(ctx) {
     race.cars.push({
       id: e.driverId, driverId: e.driverId, teamId: e.teamId, name: e.name, short: e.short, abbr: e.abbr, color: e.color,
       isPlayer: !!e.isPlayer, slot: e.slot || 0, grid: e.grid, pos: e.grid,
-      drv: e.drv, car: e.car, perf: e.perf, setupQ: e.setupQ, setupFx: e.setupFx, crew: e.crew, relMult: e.relMult || 1,
+      drv: e.drv, car: e.car, perf: e.perf, setupQ: e.setupQ, setupFx: e.setupFx, crew: e.crew, relMult: e.relMult || 1, know: e.know ?? 0.62,
       plan: e.plan, planIdx: 0, autoPlan: e.isPlayer ? e.autoPlan !== false : true, aiStyle: e.aiStyle || 'calculated',
       tyre: { c: e.plan.start, age: 0, wear: e.startWear || 0 }, compoundsUsed: [e.plan.start],
       fuel: fuelStart * (e.fuelLoad || 1), fuelTarget: e.fuelLoad || 1, mode: 'normal', ers: 'balanced', battery: 70,
@@ -69,7 +69,7 @@ export function lapTime(race, c, t, rng, isFirst = false) {
   lt += tyrePaceLoss(c.tyre) + wetPenalty(c.tyre.c, w);
   lt += w * 6 + w * (100 - c.drv.wet) * 0.04;
   lt += c.fuel * 0.032 * (t.baseLap / 85);
-  lt += m.pace + e.pace + c.damage + c.failurePen;
+  lt += m.pace + e.pace + c.damage + c.failurePen - ((c.know ?? 0.62) - 0.62) * 0.3;
   lt -= t.evo * 0.5 * (race.lap / race.laps);
   lt -= c.setupFx.topSpeed * t.drag * 2;
   lt += ((c.drv.morale ?? 70) - 70) * -0.004;
@@ -129,7 +129,9 @@ function processLap(race, c, t, rng) {
   // wear & consumption for completed lap
   const pers = PERSONALITIES[c.drv.pers] || PERSONALITIES.teamplayer;
   const w = wearPerLap({ c: c.tyre.c, track: t, car: c.car, driver: c.drv, mode: c.mode, wetness: race.wetness, dirty: c.dirty, sc: !green, setupWear: c.setupFx.wearMult, pers: pers.wear, scale: race.scale, frontBias: c.setupFx.frontBias });
-  c.tyre.wear = clamp(c.tyre.wear + w, 0, 100); c.tyre.age++;
+  c.tyre.wear = clamp(c.tyre.wear + w * (race.degMult || 1), 0, 100); c.tyre.age++;
+  if (c.know != null) c.know = Math.min(1, c.know + 0.006 * race.scale * (1 - c.know));
+  if (c.isPlayer && c.lapsDone === Math.max(3, Math.round(4 / race.scale)) && Math.abs((race.degMult || 1) - 1) > 0.06) radio(race, c, (race.degMult > 1 ? `Deg is higher than Friday — about ${Math.round((race.degMult - 1) * 100)}% more wear. Consider an earlier stop.` : `Tyres holding up better than practice suggested — ~${Math.round((1 - race.degMult) * 100)}% less wear. We could extend.`));
   const m = MODE[c.mode] || MODE.normal;
   const fuelUse = (100 / race.laps) * m.fuel * (green ? 1 : 0.55);
   c.fuel = Math.max(0, c.fuel - fuelUse);

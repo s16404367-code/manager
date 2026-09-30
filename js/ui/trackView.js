@@ -21,9 +21,28 @@ export function mapSvg(t, id = 'map', { sectors = true } = {}) {
     <path d="${trackPath(t)}" fill="none" stroke="#1f2638" stroke-width="5" stroke-linejoin="round"/>
     ${sectors ? [0, 1, 2].map((k) => `<path d="${sub(pts, k / 3, (k + 1) / 3)}" fill="none" stroke="${SECTOR_COL[k]}" stroke-opacity=".75" stroke-width="1.1" stroke-linejoin="round" stroke-linecap="round"/>`).join('') : `<path d="${trackPath(t)}" fill="none" stroke="#9aa5bb" stroke-width="1"/>`}
     <line x1="${s[0] - lx}" y1="${s[1] - ly}" x2="${s[0] + lx}" y2="${s[1] + ly}" stroke="#fff" stroke-width="1.1"/>
-    <g id="${id}-cars"></g></svg>`;
+    <path d="${pitPath(pts)}" fill="none" stroke="#5a6478" stroke-width="1.6" stroke-dasharray="1.2 .8" stroke-linecap="round"/>
+    ${pitLabel(pts)}
+    <g id="${id}-cars"></g>
+    <g id="${id}-flag" style="display:none"><rect x="30" y="-2.5" width="40" height="7" rx="2" fill="#ffd400"/><text id="${id}-flagt" x="50" y="2.9" font-size="4.6" font-weight="900" text-anchor="middle" fill="#000">SAFETY CAR</text></g></svg>`;
 }
-export const sectorLegend = () => `<div class="row tiny muted" style="gap:.8rem">${SECTOR_COL.map((c, i) => `<span><span class="sw" style="background:${c}"></span>Sector ${i + 1}</span>`).join('')}<span>▏start/finish</span></div>`;
+// Pit lane: runs parallel to the main straight around the start/finish line (d = 0.955 → 0.045), offset inward.
+const PIT_A = -0.045, PIT_B = 0.045, PIT_OFF = 3.4;
+function normalAt(pts, d) { const a = pointAt(pts, d - 0.003), b = pointAt(pts, d + 0.003); const dx = b[0] - a[0], dy = b[1] - a[1]; const L = Math.hypot(dx, dy) || 1; return [-dy / L, dx / L]; }
+function pitSide(pts) { // choose the side facing the track centroid
+  const cx = pts.reduce((a, p) => a + p[0], 0) / pts.length, cy = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+  const p = pts[0], n = normalAt(pts, 0); return ((cx - p[0]) * n[0] + (cy - p[1]) * n[1]) > 0 ? 1 : -1;
+}
+export function pitPoint(pts, u) { // u 0..1 along pit lane (entry→exit)
+  const d = PIT_A + (PIT_B - PIT_A) * u; const p = pointAt(pts, d); const n = normalAt(pts, d); const sd = pitSide(pts);
+  const ramp = Math.min(1, Math.min(u, 1 - u) / 0.18); const o = PIT_OFF * ramp * sd;
+  return [p[0] + n[0] * o, p[1] + n[1] * o];
+}
+function pitPath(pts) { const o = []; for (let i = 0; i <= 30; i++) o.push(pitPoint(pts, i / 30)); return 'M' + o.map((p) => p.map((v) => v.toFixed(2)).join(',')).join('L'); }
+function pitLabel(pts) { const p = pitPoint(pts, 0.5); const n = normalAt(pts, 0); const sd = pitSide(pts); return `<text x="${(p[0] + n[0] * 3 * sd).toFixed(1)}" y="${(p[1] + n[1] * 3 * sd + 1.2).toFixed(1)}" font-size="3" fill="#8a94a8" font-weight="800" text-anchor="middle">PIT</text>`; }
+export function placeCarAt(id, xy) { const g = document.getElementById('m_' + id); if (!g) return; g.style.display = ''; g.setAttribute('transform', `translate(${xy[0].toFixed(2)},${xy[1].toFixed(2)})`); }
+export function showFlag(id, text) { const g = document.getElementById(id + '-flag'); if (!g) return; if (!text) { g.style.display = 'none'; return; } g.style.display = ''; const t = document.getElementById(id + '-flagt'); if (t && t.textContent !== text) t.textContent = text; }
+export const sectorLegend = () => `<div class="row tiny muted" style="gap:.8rem">${SECTOR_COL.map((c, i) => `<span><span class="sw" style="background:${c}"></span>Sector ${i + 1}</span>`).join('')}<span>▏start/finish</span><span>┅ pit lane</span></div>`;
 
 export function carDots(cars) {
   return cars.map((c) => `<g id="m_${c.id}" class="cdot"><circle r="${c.isPlayer ? 2.1 : 1.5}" fill="${c.color}" stroke="${c.isPlayer ? '#fff' : '#05070b'}" stroke-width="${c.isPlayer ? 0.6 : 0.35}"/>${c.isPlayer ? `<text y="-3" font-size="3" text-anchor="middle" fill="#fff" font-weight="800" paint-order="stroke" stroke="#000" stroke-width=".6">${c.tag}</text>` : ''}</g>`).join('');

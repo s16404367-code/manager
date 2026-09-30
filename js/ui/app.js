@@ -110,6 +110,13 @@ export function start() {
     const fn = acts[el.dataset.act]; if (!fn) { console.warn('No action', el.dataset.act); return; }
     e.preventDefault(); fn(el.dataset.arg, el, e);
   });
+  // Fast-tap controls live inside panels that refresh several times per second (timing towers, speed bars).
+  // They fire on pointerdown so a re-render between press and release can never swallow the tap.
+  document.addEventListener('pointerdown', (e) => {
+    const el = e.target.closest('[data-tap]'); if (!el || el.disabled || e.button > 0) return;
+    const fn = acts[el.dataset.tap]; if (fn) { e.preventDefault(); fn(el.dataset.arg, el, e); }
+  });
+  document.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset?.tap) { e.preventDefault(); acts[e.target.dataset.tap]?.(e.target.dataset.arg, e.target, e); } });
   const onChange = (e) => { const el = e.target.closest('[data-change]'); if (!el) return; const fn = acts[el.dataset.change]; if (fn) fn(el.dataset.arg, el, e); };
   document.addEventListener('change', onChange);
   document.addEventListener('input', (e) => { const el = e.target.closest('[data-input]'); if (!el) return; const fn = acts[el.dataset.input]; if (fn) fn(el.dataset.arg, el, e); });

@@ -1,5 +1,5 @@
 // Live Race Control: timing tower, minimap, pit wall controls, radio, critical-event decisions.
-import { app, screen, on, go, esc, persist, toast, render, modal, closeModal, confirmBox } from './app.js';
+import { updateSettings, app, screen, on, go, esc, persist, toast, render, modal, closeModal, confirmBox } from './app.js';
 import { trackById, trackPath } from '../data/tracks.js';
 import { advance, actions, carById, updateOrder, MODES, ERS_MODES } from '../engines/raceEngine.js';
 import { classify } from '../engines/weekendEngine.js';
@@ -8,7 +8,7 @@ import { wetLabel } from '../engines/weatherEngine.js';
 import { DIFFICULTY, deptQ } from '../engines/world.js';
 import { fmtTime, clamp } from '../sim/util.js';
 import { tyreBadge, bar } from './widgets.js';
-import { mapSvg, carDots, placeCar, teleHtml, updateTele, sectorLegend, lapProfile, sampleAt, pointAt } from './trackView.js';
+import { mapSvg, carDots, placeCar, placeCarAt, pitPoint, showFlag, teleHtml, updateTele, sectorLegend, lapProfile, sampleAt, pointAt } from './trackView.js';
 import { trackPoints } from '../data/tracks.js';
 
 const SPEEDS = { normal: 10, fast: 30, vfast: 90 };
@@ -26,7 +26,7 @@ screen('race', {
     <div class="race" id="racegrid" data-mt="ctrl">
       <div class="card c-tower tower"><div class="row"><h4 style="margin:0">Timing</h4><span class="sp"></span><button class="btn sm ghost" data-act="gapMode" id="gapModeBtn">Interval</button></div><div id="tower"></div></div>
       <div class="c-map"><div class="mapwrap">${mapSvg(t, 'map')}${sectorLegend()}</div>
-        <div class="card tight" style="margin-top:.8rem"><h4 style="margin:0 0 .4rem">Live telemetry <span class="tiny muted" style="text-transform:none;letter-spacing:0">— tap a car in the timing tower</span></h4>${teleHtml(t, 'rtele')}</div>
+        <div class="telepair"><div class="card tight"><h4 style="margin:0 0 .4rem">Telemetry A <span class="tiny muted" style="text-transform:none;letter-spacing:0">— tap any car in the tower</span></h4>${teleHtml(t, 'rtele')}</div><div class="card tight"><h4 style="margin:0 0 .4rem">Telemetry B <span class="tiny muted" style="text-transform:none;letter-spacing:0">— team-mate</span></h4>${teleHtml(t, 'rtele2')}</div></div>
         <div class="card c-feed" style="margin-top:.8rem"><h4>Team radio & race control</h4><div class="feed" id="feed"></div></div></div>
       <div class="c-ctrl" id="ctrl"></div>
     </div>`;
@@ -40,7 +40,7 @@ function startLoop() {
   const t = trackById(app.state.weekend.trackId);
   const trk = { pts: trackPoints(t), prof: lapProfile(t), t }; const len = 1;
   const carsG = document.getElementById('map-cars');
-  carsG.innerHTML = carDots(race.cars.map((c) => ({ id: c.id, color: c.color, isPlayer: c.isPlayer, tag: esc(c.short.slice(0, 3).toUpperCase()) }))) + '<g id="scCar" style="display:none"><rect x="-1.8" y="-1.2" width="3.6" height="2.4" rx=".6" fill="#ffd400"/></g>';
+  carsG.innerHTML = carDots(race.cars.map((c) => ({ id: c.id, color: c.color, isPlayer: c.isPlayer, tag: esc(c.short.slice(0, 3).toUpperCase()) }))) + '<g id="scCar" style="display:none"><rect x="-3" y="-1.8" width="6" height="3.6" rx="1" fill="#ffd400" stroke="#000" stroke-width=".4"/><text y="1.2" font-size="2.8" font-weight="900" text-anchor="middle" fill="#000">SC</text></g>';
   app.tab.teleCar ||= race.cars.find((c) => c.isPlayer)?.id;
   race.viewTime ??= 0;
   const st = { running: !race.finished && !app._racePaused, last: performance.now(), uiT: 0, saveT: 0 };
@@ -124,19 +124,25 @@ on({
 function drawMap(race, len, trk) {
   const T = race.viewTime ?? race.time;
   let leaderD = null; const sel = app.tab.teleCar;
+  const mine = race.cars.filter((c) => c.isPlayer); const selB = mine.find((c) => c.id !== sel)?.id || mine[1]?.id;
   for (const c of race.cars) {
     if (c.dnf) { const g = document.getElementById('m_' + c.id); if (g) g.style.opacity = 0.18; continue; }
     const f = c.finished ? 0 : clamp((T - c.lapStart) / Math.max(1, c.lapEnd - c.lapStart), 0, 0.999);
     const d = sampleAt(trk.prof, f).d;
     if (c.pos === 1) leaderD = d;
-    placeCar(trk.pts, c.id, d);
-    if (c.id === sel) {
+    // pit lane: entering at the end of a lap with a box call, leaving at the start of the lap after a stop
+    const justPitted = c.stops.length && c.stops[c.stops.length - 1].lap === c.lapsDone && !c.finished;
+    const entering = c.pitReq && d > 0.955; const leaving = justPitted && d < 0.045;
+    const inPit = entering || leaving;
+    if (inPit) placeCarAt(c.id, pitPoint(trk.pts, entering ? (d - 0.955) / 0.09 : (d + 0.045) / 0.09)); else placeCar(trk.pts, c.id, d);
+    if (c.id === sel || c.id === selB) {
       const k = race.sc.state === 'sc' ? 1.45 : race.sc.state === 'vsc' ? 1.3 : 1;
-      const drs = !race.sc.state && race.lap > 2 && (app._iv?.[c.id] ?? 9) < 1;
-      updateTele(trk.t, 'rtele', `<span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b> <span class="muted">P${c.pos} · L${Math.min(c.lapsDone + 1, race.laps)}</span>`, f, { k, state: c.finished ? 'garage' : 'track', drs });
+      const drs = race.sc.state === 'none' && race.lap > 2 && (app._iv?.[c.id] ?? 9) < 1;
+      updateTele(trk.t, c.id === sel ? 'rtele' : 'rtele2', `<span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b> <span class="muted">P${c.pos} · L${Math.min(c.lapsDone + 1, race.laps)}${inPit ? ' · PIT LANE' : ''}</span>`, f, { k, state: c.finished ? 'garage' : inPit ? 'pit' : 'track', drs });
     }
   }
   const sc = document.getElementById('scCar');
+  showFlag('map', race.sc.state === 'sc' ? 'SAFETY CAR' : race.sc.state === 'vsc' ? 'VIRTUAL SAFETY CAR' : race.finished ? 'CHEQUERED FLAG' : null);
   if (sc) { if (race.sc.state === 'sc' && leaderD != null) { const p = pointAt(trk.pts, leaderD + 0.025); sc.style.display = ''; sc.setAttribute('transform', `translate(${p[0]},${p[1]})`); } else sc.style.display = 'none'; }
 }
 const crossAt = (c, k) => { let t = 0; for (let i = 0; i < k && i < c.laps.length; i++) t += c.laps[i]; return t; };
@@ -156,8 +162,8 @@ function drawBar(race, st) {
   const sp = app.settings.speed;
   const html = `<span class="lap mono">L${Math.min(race.lap, race.laps)}/${race.laps}</span>${flag}<span class="small">${wetLabel(race.wetness)}${race.wetness > 0.05 ? ` (${Math.round(race.wetness * 100)}%)` : ''}</span>
   <span class="sp"></span>
-  ${race.finished ? `<button class="btn primary" data-act="toDebrief">Race debrief →</button>` : `<div class="row speed" role="group" aria-label="Simulation speed"><button class="btn sm ${st?.running ? '' : 'on'}" data-act="rpause" aria-label="Pause">${st?.running ? '⏸' : '▶'}</button>
-  ${Object.entries({ normal: '1×', fast: '3×', vfast: '9×' }).map(([k, l]) => `<button class="btn sm ${sp === k ? 'on' : ''}" data-act="rspeed" data-arg="${k}">${l}</button>`).join('')}<button class="btn sm ghost" data-act="rskip" title="Let the engineers run the rest">⏭</button></div>`}`;
+  ${race.finished ? `<button class="btn primary" data-act="toDebrief">Race debrief →</button>` : `<div class="row speed" role="group" aria-label="Simulation speed"><button class="btn sm ${st?.running ? '' : 'on'}" data-tap="rpause" aria-label="Pause">${st?.running ? '⏸' : '▶'}</button>
+  ${Object.entries({ normal: '1×', fast: '3×', vfast: '9×' }).map(([k, l]) => `<button class="btn sm ${sp === k ? 'on' : ''}" data-tap="rspeed" data-arg="${k}">${l}</button>`).join('')}<button class="btn sm ghost" data-act="rskip" title="Let the engineers run the rest">⏭</button></div>`}`;
   if (el._html !== html) { el.innerHTML = html; el._html = html; }
 }
 function drawUI(race) {
@@ -169,7 +175,7 @@ function drawUI(race) {
   const fl = Math.min(...race.cars.flatMap((c) => c.laps.slice(1)).filter(Number.isFinite), Infinity);
   app._iv = {}; for (const c of order) { const g = gapOf(race, c, order, 'interval'); app._iv[c.id] = parseFloat(String(g).replace('+', '')); }
   const lastCls = (c) => { const l = c.laps[c.laps.length - 1]; if (!l || c.laps.length < 2) return ''; if (l <= fl + 1e-6) return 'purple'; return l <= Math.min(...c.laps.slice(1)) + 1e-6 ? 'pb' : ''; };
-  if (tw) tw.innerHTML = `<table><tbody>${order.map((c) => `<tr class="${c.isPlayer ? 'pl' : ''} ${c.dnf ? 'dnf' : ''} ${app.tab.teleCar === c.id ? 'sel' : ''}" data-act="teleSel" data-arg="${c.id}" style="cursor:pointer"><td class="pos">${c.pos}</td><td><span class="sw" style="background:${c.color}"></span></td><td class="nm">${esc(c.short)}${c.pos < c.grid && !c.dnf ? ' <span class="good tiny">▲' + (c.grid - c.pos) + '</span>' : c.pos > c.grid && !c.dnf ? ' <span class="bad tiny">▼' + (c.pos - c.grid) + '</span>' : ''}</td><td class="mono small">${gapOf(race, c, order, mode)}</td><td class="mono tiny lt ${lastCls(c)}">${c.lastLap ? fmtTime(c.lastLap) : ''}</td><td>${c.dnf ? '' : tyreBadge(c.tyre.c)}</td><td class="tiny muted">${c.dnf ? esc(c.dnf).slice(0, 10) : c.tyre.age + 'L'}${c.stops.length ? ' ·' + c.stops.length + 'P' : ''}</td></tr>`).join('')}</tbody></table>`;
+  if (tw) tw.innerHTML = `<table><tbody>${order.map((c) => `<tr class="${c.isPlayer ? 'pl' : ''} ${c.dnf ? 'dnf' : ''} ${app.tab.teleCar === c.id ? 'sel' : ''}" data-tap="teleSel" tabindex="0" data-arg="${c.id}" style="cursor:pointer"><td class="pos">${c.pos}</td><td><span class="sw" style="background:${c.color}"></span></td><td class="nm">${esc(c.short)}${c.pos < c.grid && !c.dnf ? ' <span class="good tiny">▲' + (c.grid - c.pos) + '</span>' : c.pos > c.grid && !c.dnf ? ' <span class="bad tiny">▼' + (c.pos - c.grid) + '</span>' : ''}</td><td class="mono small">${gapOf(race, c, order, mode)}</td><td class="mono tiny lt ${lastCls(c)}">${c.lastLap ? fmtTime(c.lastLap) : ''}</td><td>${c.dnf ? '' : tyreBadge(c.tyre.c)}</td><td class="tiny muted">${c.dnf ? esc(c.dnf).slice(0, 10) : c.tyre.age + 'L'}${c.stops.length ? ' ·' + c.stops.length + 'P' : ''}</td></tr>`).join('')}</tbody></table>`;
   const ctrl = document.getElementById('ctrl');
   const html = race.cars.filter((c) => c.isPlayer).map((c) => carPanel(race, c, order, info)).join('') + `<div class="card tight small muted">Space = pause. Critical events pause automatically (configure in Settings). Pit calls take effect at the end of the current lap.</div>`;
   if (ctrl && ctrl._html !== html) { ctrl.innerHTML = html; ctrl._html = html; }
@@ -205,7 +211,7 @@ on({
   mtab: (k, el) => { document.getElementById('racegrid').dataset.mt = k; el.parentElement.querySelectorAll('.btn').forEach((b) => b.classList.toggle('on', b === el)); },
   gapMode: () => { app.tab.gapMode = app.tab.gapMode === 'leader' ? 'interval' : 'leader'; document.getElementById('gapModeBtn').textContent = app.tab.gapMode === 'leader' ? 'To leader' : 'Interval'; drawUI(R()); },
   rpause: () => togglePause(),
-  rspeed: (k) => { app.settings.speed = k; drawBar(R(), app._raceSt); },
+  rspeed: (k) => { updateSettings({ speed: k }); drawBar(R(), app._raceSt); },
   rskip: async () => {
     const ok = await confirmBox('Simulate to the flag?', 'Engineers will run the rest of the race using your plan. Critical decisions will be made automatically.', 'Simulate');
     if (!ok) return; const race = R(); const t = trackById(app.state.weekend.trackId);
