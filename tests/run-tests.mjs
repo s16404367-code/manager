@@ -7,6 +7,9 @@ import { advance } from '../js/engines/raceEngine.js';
 import { trackById, TRACKS } from '../js/data/tracks.js';
 import { validate, migrate, repair } from '../js/state/persistence.js';
 import { planOptions } from '../js/engines/strategyEngine.js';
+import * as SE from '../js/engines/sessionEngine.js';
+import { lapProfile, sampleAt } from '../js/data/tracks.js';
+import { SETUP_KEYS, setupOptimum, setupQuality, setupCharacter } from '../js/engines/carModel.js';
 
 let pass = 0, fail = 0; const failures = [];
 const ok = (cond, msg) => { if (cond) pass++; else { fail++; failures.push(msg); } };
@@ -53,13 +56,13 @@ ok(Object.keys(stratTally).length >= 2, 'more than one strategy type succeeds (n
 ok(dnfs / cars < 0.25, `DNF rate reasonable (${(dnfs / cars * 100).toFixed(1)}%)`);
 
 // 2. Determinism
-const a = createWorld({ mode: 'quick', seed: 77, playerTeamId: 'tm_aurora', trackId: 'trk_hanasaki' });
-const b = createWorld({ mode: 'quick', seed: 77, playerTeamId: 'tm_aurora', trackId: 'trk_hanasaki' });
+const a = createWorld({ mode: 'quick', seed: 77, playerTeamId: 'tm_aurora', trackId: 'trk_suzuka' });
+const b = createWorld({ mode: 'quick', seed: 77, playerTeamId: 'tm_aurora', trackId: 'trk_suzuka' });
 runRace(a); runRace(b);
 ok(JSON.stringify(a.weekend.result.rows.map((r) => r.did)) === JSON.stringify(b.weekend.result.rows.map((r) => r.did)), 'same seed → same result');
 
 // 3. Strategy planner returns options with different stop counts
-const s3 = createWorld({ mode: 'quick', seed: 5, playerTeamId: 'tm_papaya', trackId: 'trk_kestrel' });
+const s3 = createWorld({ mode: 'quick', seed: 5, playerTeamId: 'tm_papaya', trackId: 'trk_monza' });
 W.startWeekend(s3);
 const opts = planOptions(W.strategyContext(s3, s3.teams.tm_papaya.drivers[0]));
 ok(opts.length >= 3, 'strategy options available');
@@ -89,6 +92,41 @@ for (let season = 1; season <= 3; season++) {
   ok(Object.values(career.teams).every((t) => t.drivers.length === 2 && t.drivers.every(Boolean)), 'all teams have 2 drivers after market');
 }
 // Save round trip
+// ---- v3.1: real tracks, speed profiles, live sessions, 10-param setup ----
+ok(TRACKS.length === 24, '24 calendar circuits');
+for (const t of TRACKS) {
+  const p = lapProfile(t);
+  ok(p.N === 200 && p.v.every((v) => Number.isFinite(v) && v > 10 && v < 110), 'profile speeds sane ' + t.id);
+  ok(p.tf.every((x, i) => i === 0 || x > p.tf[i - 1]), 'profile time monotonic ' + t.id);
+  for (let f = 0; f < 1; f += 0.037) { const q = sampleAt(p, f); ok(q.d >= 0 && q.d < 1 && Number.isFinite(q.v) && q.gear >= 1 && q.gear <= 8, 'sampleAt ' + t.id); }
+  const o = setupOptimum(t, { dragEff: 70, highAero: 70, lowAero: 70, traction: 70 }, null, { pers: 'aggressive' });
+  ok(SETUP_KEYS.every((k) => o[k] >= 0 && o[k] <= 10), 'optimum in range ' + t.id);
+  ok(Math.abs(setupQuality(o, o) - 1) < 1e-9, 'perfect setup = 1');
+  ok(Object.values(setupCharacter(o)).every(Number.isFinite), 'character finite');
+}
+{
+  const o1 = setupOptimum(trackById('trk_monza'), { dragEff: 70, highAero: 70, lowAero: 70, traction: 70 }, null, null);
+  const o2 = setupOptimum(trackById('trk_monaco'), { dragEff: 70, highAero: 70, lowAero: 70, traction: 70 }, null, null);
+  ok(o2.rearWing - o1.rearWing > 4, 'Monaco wants far more wing than Monza');
+  const a = setupOptimum(trackById('trk_suzuka'), { dragEff: 70, highAero: 70, lowAero: 70, traction: 70 }, null, { pers: 'aggressive' });
+  const c = setupOptimum(trackById('trk_suzuka'), { dragEff: 70, highAero: 70, lowAero: 70, traction: 70 }, null, { pers: 'conservative' });
+  ok(a.frontWing > c.frontWing, 'aggressive driver prefers more front wing (oversteer)');
+}
+for (let i = 0; i < 6; i++) {
+  const tr = TRACKS[(i * 5) % 24];
+  const s = createWorld({ mode: 'quick', seed: 300 + i, playerTeamId: 'tm_verdant', trackId: tr.id });
+  W.startWeekend(s);
+  const sess = SE.createSession(s, 'practice'); const pt = s.teams[s.player];
+  pt.drivers.forEach((d) => SE.sendOut(s, d, 4));
+  SE.advanceSession(s, 400); SE.setupChanged(s, pt.drivers[0]);
+  SE.simulateRest(s); ok(sess.done, 'practice session completes');
+  ok(sess.cars.every((c) => c.st !== 'track'), 'no car left on track');
+  SE.commitSession(s); ok(s.weekend.practice.done === 1 && !s.weekend.live, 'practice committed');
+  for (let q = 0; q < 3; q++) { const qs = SE.createSession(s, 'quali'); ok(qs.cars.length === [20, 15, 10][q], 'quali entrants ' + q); SE.simulateRest(s); ok(qs.cars.some((c) => c.best < 1e8), 'times set'); ok(qs.clock < qs.len + 400, 'flag lap bounded'); SE.commitSession(s); }
+  ok(s.weekend.grid.length === 20 && new Set(s.weekend.grid).size === 20, 'grid from live quali');
+  ok(s.weekend.quali.results.every((r) => r.every((x) => Number.isFinite(x.time))), 'quali times finite');
+  const js = JSON.parse(JSON.stringify(s)); ok(!validate(js).length, 'state valid after live sessions');
+}
 const text = JSON.stringify({ state: career });
 const loaded = repair(migrate(JSON.parse(text).state));
 ok(!validate(loaded).length, 'save round-trip valid');

@@ -6,7 +6,7 @@ import { DRIVERS } from '../data/drivers.js';
 import { TRACKS } from '../data/tracks.js';
 import { DEPARTMENTS, FACILITIES, FIRST, LAST, SPECIALTIES, SPONSOR_POOL } from '../data/content.js';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 export const POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
 export const DIFFICULTY = {
   beginner: { label: 'Beginner', info: 1.0, cost: 0.85, ai: 0.8, events: 0.7, patience: 1.4, desc: 'More information, softer finances and board.' },
@@ -132,7 +132,13 @@ export function createWorld(opts) {
   state.rngS = rng.s;
   return state;
 }
-export function pickCalendar(rng, len) { return rng.shuffle(TRACKS).slice(0, Math.min(len, TRACKS.length)).map((t) => t.id); }
+// Real 2026 calendar order; shorter seasons take an evenly spaced subset (keeps the season's geography).
+export function pickCalendar(rng, len) {
+  const n = Math.min(len, TRACKS.length); if (n >= TRACKS.length) return TRACKS.map((t) => t.id);
+  const off = rng.next() * (TRACKS.length / n); const out = [];
+  for (let i = 0; i < n; i++) out.push(TRACKS[Math.floor(off + i * TRACKS.length / n) % TRACKS.length].id);
+  return [...new Set(out)];
+}
 export function genStaffMarket(rng, n) {
   const keys = Object.keys(DEPARTMENTS); const list = [];
   for (let i = 0; i < n; i++) { const k = rng.pick(keys); list.push(genStaff(rng, DEPARTMENTS[k].role, k, rng.range(50, 85))); }

@@ -4,7 +4,8 @@ import { createWorld, DIFFICULTY, driverSalary, driverRating } from '../engines/
 import { startWeekend } from '../engines/weekendEngine.js';
 import { TEAMS, PROFILES, PHILOSOPHIES } from '../data/teams.js';
 import { DRIVERS, PERSONALITIES } from '../data/drivers.js';
-import { TRACKS, trackPath } from '../data/tracks.js';
+import { TRACKS, trackPath, kmLen } from '../data/tracks.js';
+import { mapSvg } from './trackView.js';
 import { load, meta } from '../state/persistence.js';
 import { money } from '../sim/util.js';
 
@@ -55,7 +56,7 @@ screen('newcareer', {
       <div class="card"><h3>2 · Rules of the game</h3>
         <div class="grid g2" style="gap:.6rem">
           <div><label>Difficulty</label><select data-change="cdraft" data-arg="difficulty">${Object.entries(DIFFICULTY).map(([k, v]) => `<option value="${k}" ${d.difficulty === k ? 'selected' : ''}>${v.label}</option>`).join('')}</select><div class="tiny muted">${DIFFICULTY[d.difficulty].desc}</div></div>
-          <div><label>Season length</label><select data-change="cdraft" data-arg="seasonLength">${[8, 12, 16].map((n) => `<option value="${n}" ${d.seasonLength == n ? 'selected' : ''}>${n} races</option>`).join('')}</select></div>
+          <div><label>Season length</label><select data-change="cdraft" data-arg="seasonLength">${[8, 12, 16, 24].map((n) => `<option value="${n}" ${d.seasonLength == n ? 'selected' : ''}>${n === 24 ? '24 races (full 2026 calendar)' : n + ' races'}</option>`).join('')}</select></div>
           <div><label>Race distance</label><select data-change="cdraft" data-arg="raceLength">${[[0.25, '25% (~5 min)'], [0.35, '35% (~8 min)'], [0.5, '50% (~12 min)'], [1, '100% (full)']].map(([v, l]) => `<option value="${v}" ${d.raceLength == v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
           <div><label>Control level</label><select data-change="cdraft" data-arg="control"><option value="principal" ${d.control === 'principal' ? 'selected' : ''}>Principal (delegate details)</option><option value="hands-on" ${d.control === 'hands-on' ? 'selected' : ''}>Hands-on Principal</option></select></div>
         </div>
@@ -89,7 +90,7 @@ on({
 });
 
 // ---------------- Quick race ----------------
-const qd = () => (app.draft.quick ||= { team: 'tm_papaya', track: 'trk_silverbrook', raceLength: 0.35, weather: 'random', difficulty: 'standard' });
+const qd = () => (app.draft.quick ||= { team: 'tm_papaya', track: 'trk_silverstone', raceLength: 0.35, weather: 'random', difficulty: 'standard' });
 screen('quick', {
   needsState: false, bare: true,
   render() {
@@ -98,8 +99,8 @@ screen('quick', {
     <div class="row"><button class="btn ghost" data-act="go" data-arg="menu">← Back</button><h1 style="margin:0">Quick Race</h1></div>
     <div class="card" style="margin-top:1rem"><h3>1 · Select team</h3><div class="grid g4">${TEAMS.map((t) => { const ds = DRIVERS.filter((x) => x.team === t.id); return `<button class="choice ${d.team === t.id ? 'on' : ''}" data-act="qset" data-arg="team:${t.id}"><div class="row"><span class="sw" style="background:${t.color};width:16px;height:16px"></span><b>${esc(t.name)}</b></div><div class="tiny muted">${PROFILES[t.tier].label} · ${PHILOSOPHIES[t.philosophy].label}</div><div class="small">${ds.map((x) => esc(x.name)).join(' · ')}</div></button>`; }).join('')}</div></div>
     <div class="grid g2" style="margin-top:1rem">
-      <div class="card"><h3>2 · Circuit</h3><select data-change="qset2" data-arg="track">${TRACKS.map((t) => `<option value="${t.id}" ${d.track === t.id ? 'selected' : ''}>${esc(t.name)} — ${t.archetype}</option>`).join('')}</select>
-        <div class="row" style="margin-top:.6rem;align-items:flex-start"><svg viewBox="0 0 100 76" style="width:160px;flex:none"><path d="${trackPath(tr)}" fill="none" stroke="#e8ecf4" stroke-width="2.2"/></svg>
+      <div class="card"><h3>2 · Circuit</h3><select data-change="qset2" data-arg="track">${TRACKS.map((t, i) => `<option value="${t.id}" ${d.track === t.id ? 'selected' : ''}>R${i + 1} · ${esc(t.gp)} — ${esc(t.name)}</option>`).join('')}</select>
+        <div class="row" style="margin-top:.6rem;align-items:flex-start"><div style="width:190px;flex:none">${mapSvg(tr, 'qmap')}<div class="tiny muted" style="text-align:center">${esc(tr.country)} · ${kmLen(tr)} km · ${esc(tr.archetype)}</div></div>
         <div class="small"><b>${esc(tr.archetype)}</b><br>Downforce demand ${Math.round(tr.df * 100)}% · Drag sensitivity ${Math.round(tr.drag * 100)}%<br>Tyre degradation ${Math.round(tr.deg * 100)}% · Overtaking difficulty ${Math.round(tr.ovt * 100)}%<br>Safety-car likelihood ${Math.round(tr.sc * 100)}% · Weather volatility ${Math.round(tr.wx * 100)}%</div></div></div>
       <div class="card"><h3>3 · Options</h3><div class="grid g2" style="gap:.6rem">
         <div><label>Race distance</label><select data-change="qset2" data-arg="raceLength">${[[0.2, '20% (~4 min)'], [0.35, '35% (~8 min)'], [0.5, '50% (~12 min)'], [1, '100% (full)']].map(([v, l]) => `<option value="${v}" ${d.raceLength == v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>

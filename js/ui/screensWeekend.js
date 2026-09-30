@@ -1,10 +1,14 @@
 // Race weekend: preparation, practice, qualifying, strategy lab.
 import { app, screen, on, go, esc, persist, toast, render, modal, closeModal } from './app.js';
-import { trackById, trackPath } from '../data/tracks.js';
+import { trackById, trackPath, TRACKS, kmLen } from '../data/tracks.js';
+import { createSession, commitSession } from '../engines/sessionEngine.js';
+import { mapSvg } from './trackView.js';
 import { ATTR_LABEL } from '../data/teams.js';
 import { PERSONALITIES } from '../data/drivers.js';
 import { startWeekend, runPractice, runQualiSession, engineerEstimate, PRACTICE_PROGRAMS, strategyContext, defaultPlans, buildRace } from '../engines/weekendEngine.js';
-import { effectiveCar, trackScore, SETUP_KEYS, SETUP_LABEL, SETUP_HINT, setupQuality } from '../engines/carModel.js';
+import { effectiveCar, trackScore, SETUP_KEYS, SETUP_LABEL, SETUP_HINT, SETUP_GROUPS, setupQuality, setupCharacter, driverStyle } from '../engines/carModel.js';
+import { setupChanged } from '../engines/sessionEngine.js';
+import { liveView, startLive, stopLive } from './screenSession.js';
 import { planOptions, labelPlans, clonePlan } from '../engines/strategyEngine.js';
 import { COMPOUNDS, estimateStint } from '../engines/tyreEngine.js';
 import { wetLabel } from '../engines/weatherEngine.js';
@@ -30,30 +34,44 @@ function forecastStrip(wk) {
   <div class="small">${wk.forecast.filter((f) => f.prob >= 35).length ? `Rain risk: ${wk.forecast.filter((f) => f.prob >= 35).map((f) => `L${f.from}–${f.to} (${Math.max(0, f.prob - f.unc)}–${Math.min(100, f.prob + f.unc)}%)`).join(', ')}` : 'Mostly dry expected.'} <span class="muted">Forecast confidence: ${wk.forecastAcc > 0.8 ? 'high' : wk.forecastAcc > 0.6 ? 'moderate' : 'low'}.</span></div>`;
 }
 
+function meters(setup, did) {
+  const ch = setupCharacter(setup);
+  return Object.entries(ch).map(([k, v]) => k === 'Balance'
+    ? `<div class="meter"><span>Balance</span><div class="balbar"><i style="left:${v}%"></i></div><em class="tiny muted">${v > 58 ? 'Oversteer' : v < 42 ? 'Understeer' : 'Neutral'}</em></div>`
+    : `<div class="meter"><span>${k}</span><div class="bar"><i style="width:${v}%"></i></div><em class="mono tiny">${Math.round(v)}</em></div>`).join('');
+}
 function setupPanel(s, wk) {
-  const pt = s.teams[s.player];
+  const pt = s.teams[s.player]; const live = wk.live;
   return pt.drivers.map((did) => {
     const d = s.drivers[did]; const est = engineerEstimate(wk, did); const cur = wk.setups[did]; const k = wk.knowledge[did];
     const conf = Math.round(Object.values(k).reduce((a, b) => a + b, 0) / SETUP_KEYS.length * 100);
     const info = DIFFICULTY[s.difficulty].info;
     const qEst = setupQuality(cur, wk.opt[did]);
     const shownQ = info >= 1 ? `${Math.round(qEst * 100)}%` : qEst > 0.9 ? 'Excellent' : qEst > 0.78 ? 'Good' : qEst > 0.6 ? 'Compromised' : 'Poor';
-    return `<div class="card"><div class="row"><h3 style="margin:0">${esc(d.name)}</h3>${pill(PERSONALITIES[d.pers].label)}<span class="sp"></span><span class="small muted">Engineer confidence ${conf}%</span></div>
-    <div class="small" style="margin:.3rem 0">Driver-reported balance: <b>${shownQ}</b> ${helpBtn('setup')}</div>
-    ${SETUP_KEYS.map((key) => `<div style="margin:.35rem 0"><div class="row small"><span title="${esc(SETUP_HINT[key])}">${SETUP_LABEL[key]}</span><span class="sp"></span><span class="muted">eng. est. ${est[key]}</span><b class="mono" style="width:2.2em;text-align:right">${cur[key]}</b></div>
-      <input type="range" min="0" max="10" step="0.5" value="${cur[key]}" aria-label="${SETUP_LABEL[key]}" data-input="setup" data-arg="${did}:${key}"></div>`).join('')}
-    <div class="row"><button class="btn sm" data-act="applyEst" data-arg="${did}">Apply engineer estimate</button><span class="tiny muted">${SETUP_HINT.wing}</span></div></div>`;
+    const lc = live?.cars.find((c) => c.did === did); const locked = lc && lc.st === 'track';
+    const st = driverStyle(d); const styleTxt = st > 0.3 ? 'prefers a pointy, oversteery car' : st < -0.3 ? 'prefers a stable, understeery car' : 'is comfortable with a neutral balance';
+    return `<div class="card setupcard"><div class="row"><span class="sw" style="background:${pt.color}"></span><h3 style="margin:0">${esc(d.name)}</h3>${pill(PERSONALITIES[d.pers].label)}<span class="sp"></span><span class="small muted">Engineer confidence <b>${conf}%</b></span></div>
+    <div class="small" style="margin:.35rem 0">Driver-reported feel: <b>${shownQ}</b> ${helpBtn('setup')} <span class="muted">· ${esc(d.name.split(' ').slice(-1)[0])} ${styleTxt}.</span></div>
+    ${locked ? '<div class="alert warn small">Car is on track — setup changes only in the garage.</div>' : live ? `<div class="tiny muted">Each change in the garage costs ~30s of session time.</div>` : ''}
+    <div class="setup-grid"><div>${SETUP_GROUPS.map(([g, keys]) => `<div class="sgroup"><div class="sgh">${g}</div>${keys.map((key) => `<div class="srow"><div class="row small"><span title="${esc(SETUP_HINT[key])}">${SETUP_LABEL[key]}</span><span class="sp"></span><span class="muted tiny">est. ${est[key]}</span><b class="mono sval">${cur[key]}</b></div>
+      <input type="range" min="0" max="10" step="0.5" value="${cur[key]}" ${locked ? 'disabled' : ''} aria-label="${SETUP_LABEL[key]}" data-input="setup" data-change="setupDone" data-arg="${did}:${key}"><div class="tiny muted shint">${esc(SETUP_HINT[key])}</div></div>`).join('')}</div>`).join('')}</div>
+    <div class="meters" id="meters-${did}"><div class="sgh">Predicted car character</div>${meters(cur, did)}<div class="tiny muted" style="margin-top:.4rem">These describe the setup itself. Match them to the circuit profile and the driver's taste.</div></div></div>
+    <div class="row" style="margin-top:.5rem"><button class="btn sm" data-act="applyEst" data-arg="${did}" ${locked ? 'disabled' : ''}>Apply engineer estimate</button><button class="btn sm ghost" data-act="toggleHints">Show/hide hints</button></div></div>`;
   }).join('');
 }
 on({
-  setup: (arg, el) => { const [did, key] = arg.split(':'); WK().setups[did][key] = +el.value; const b = el.parentElement.querySelector('b.mono'); if (b) b.textContent = el.value; },
-  applyEst: (did) => { WK().setups[did] = engineerEstimate(WK(), did); persist(); render(); toast('Setup updated to engineer estimate.'); },
+  setup: (arg, el) => { const [did, key] = arg.split(':'); WK().setups[did][key] = +el.value; const b = el.parentElement.querySelector('b.sval'); if (b) b.textContent = el.value; const m = document.getElementById('meters-' + did); if (m) m.innerHTML = '<div class="sgh">Predicted car character</div>' + meters(WK().setups[did], did); },
+  setupDone: (arg) => { const [did] = arg.split(':'); if (WK().live && setupChanged(S(), did)) toast('Mechanics working on the car (+30s).', 'info', 1500); persist(); },
+  applyEst: (did) => { WK().setups[did] = engineerEstimate(WK(), did); if (WK().live) setupChanged(S(), did); persist(); render(); toast('Setup updated to engineer estimate.'); },
+  toggleHints: () => { document.body.classList.toggle('showhints'); },
 });
 
 screen('weekend', {
+  keepScroll: true,
+  after: () => weekendAfter(),
   render() {
     const s = S();
-    if (s.mode === 'career' && !s.weekend) {
+    if (!s.weekend) {
       if (s.phase === 'review') return `<div class="empty">Season complete. <a href="#/review">Open the season review →</a></div>`;
       if (s.pendingEvent) return `<div class="card"><h2>Decision required before the weekend</h2><p class="muted">Resolve the pending matter in HQ first.</p><button class="btn primary" data-act="go" data-arg="hq">Go to HQ</button></div>`;
       const t = trackById(s.calendar[s.round]);
@@ -64,17 +82,18 @@ screen('weekend', {
     if (wk.phase === 'post') { return `<div class="card"><h2>Race complete</h2><button class="btn primary" data-act="go" data-arg="post">Open debrief →</button></div>`; }
     const t = trackById(wk.trackId);
     const body = { prep: prepView, practice: practiceView, quali: qualiView, strategy: strategyView }[wk.phase]?.(s, wk, t) || '';
-    return `<div class="pagehead"><h1>${esc(t.name)}</h1><span class="pill">${esc(t.archetype)}</span><span class="pill">${wk.laps} laps${wk.scale > 1.05 ? ' · compressed' : ''}</span>${helpBtn('weekend')}</div>${stepper(wk.phase)}${body}`;
+    return `<div class="pagehead"><div class="gphead"><span class="rnd">R${(s.mode === 'career' ? s.round + 1 : TRACKS.indexOf(t) + 1)}</span><div><div class="tiny muted">${esc(t.gp)} · ${esc(t.country)}</div><h1>${esc(t.name)}</h1></div></div><span class="pill">${esc(t.archetype)}</span><span class="pill">${wk.laps} laps${wk.scale > 1.05 ? ' · compressed' : ''}</span>${helpBtn('weekend')}</div>${stepper(wk.phase)}${body}`;
   },
 });
 on({ beginWeekend: () => { startWeekend(S()); persist(); render(); } });
+function weekendAfter() { stopLive(); if (S()?.weekend?.live) startLive(); }
 
 function prepView(s, wk, t) {
   const pt = s.teams[s.player]; const car = effectiveCar(pt, 0); const sc = trackScore(car, t); const b = sc.breakdown;
   const rank = fieldRank(s, t); const unc = Math.round((1 - DIFFICULTY[s.difficulty].info) * 5) + 1;
   const dem = [['Downforce', t.df], ['Drag sensitivity', t.drag], ['Low-speed', t.low], ['High-speed', t.high], ['Braking', t.brake], ['Traction', t.trac], ['Tyre deg', t.deg], ['Kerbs', t.kerb], ['Cooling', t.cool], ['Engine stress', t.eng], ['Overtaking diff.', t.ovt], ['Safety car', t.sc]];
   return `<div class="grid g2">
-  <div class="card"><h3>Circuit profile</h3><div class="row" style="align-items:flex-start"><svg viewBox="0 0 100 76" style="width:150px;flex:none"><path d="${trackPath(t)}" fill="none" stroke="#e8ecf4" stroke-width="2.4"/></svg>
+  <div class="card"><h3>Circuit profile</h3><div class="row" style="align-items:flex-start"><div style="width:190px;flex:none">${mapSvg(t, 'pmap')}<div class="tiny muted" style="text-align:center">${kmLen(t)} km · ${t.laps} laps (full)</div></div>
     <div class="grid" style="grid-template-columns:1fr 1fr;gap:.3rem .8rem;flex:1">${dem.map(([l, v]) => `<div class="small">${l}${bar(v * 100, 100, v > 0.75 ? 'var(--accent2)' : null)}</div>`).join('')}</div></div>
     <p class="small muted">Pit-lane loss ≈ ${t.pit}s · Track evolution ${Math.round(t.evo * 100)}% · DRS effect ${Math.round(t.drs * 100)}%</p></div>
   <div class="card"><h3>Car suitability ${helpBtn('suitability')}</h3>
@@ -93,24 +112,28 @@ on({
   skipPractice: () => { WK().phase = 'quali'; persist(); render(); },
 });
 
-function practiceView(s, wk) {
+function practiceView(s, wk, t) {
+  if (wk.live?.kind === 'practice') return liveView(s, wk, t) + `<h3 style="margin-top:1rem">Setup — garage</h3><div class="grid g2">${setupPanel(s, wk)}</div>`;
   const pt = s.teams[s.player];
   const left = wk.practice.total - wk.practice.done;
   app.tab.prog ||= {};
   return `<div class="card"><div class="row"><h3 style="margin:0">Free Practice ${Math.min(wk.practice.done + 1, wk.practice.total)} / ${wk.practice.total}</h3><span class="sp"></span>${left ? '' : pill('All sessions complete', 'good')}</div>
-    <p class="small muted">Choose a programme for each driver. Track time is limited — you can't learn everything.</p>
+    <p class="small muted">Go live to run the session yourself — send cars out, pick programmes and tyres, change the setup between runs, and watch live timing and telemetry. Or pick a programme per driver and quick-simulate.</p>
     <div class="grid g2">${pt.drivers.map((did) => { const cur = app.tab.prog[did] || 'setup'; return `<div><b>${esc(s.drivers[did].name)}</b><div class="col" style="margin-top:.4rem">${Object.entries(PRACTICE_PROGRAMS).map(([k, p]) => `<button class="choice ${cur === k ? 'on' : ''}" data-act="prog" data-arg="${did}:${k}"><b class="small">${p.label}</b><div class="tiny muted">${p.desc}</div></button>`).join('')}</div></div>`; }).join('')}</div>
-    <div class="row" style="margin-top:.8rem"><button class="btn primary" data-act="runPractice" ${left ? '' : 'disabled'}>Run session</button><span class="sp"></span><button class="btn" data-act="toQuali">Go to qualifying →</button></div></div>
+    <div class="row" style="margin-top:.8rem"><button class="btn primary" data-act="liveFP" ${left ? '' : 'disabled'}>▶ Go live (telemetry)</button><button class="btn" data-act="runPractice" ${left ? '' : 'disabled'}>Quick simulate</button><span class="sp"></span><button class="btn" data-act="toQuali">Go to qualifying →</button></div></div>
   ${wk.practice.reports.slice().reverse().map((r) => `<div class="card" style="margin-top:.7rem"><h4>FP${r.session} engineering report</h4>${r.lines.map((l) => `<div class="small" style="margin:.2rem 0">• ${esc(l.text)}</div>`).join('')}</div>`).join('')}
   <h3 style="margin-top:1rem">Setup</h3><div class="grid g2">${setupPanel(s, wk)}</div>`;
 }
 on({
   prog: (arg) => { const [did, k] = arg.split(':'); app.tab.prog[did] = k; render(); },
   runPractice: () => { const wk = WK(); const progs = {}; for (const did of S().teams[S().player].drivers) progs[did] = app.tab.prog?.[did] || 'setup'; runPractice(S(), progs); persist(); render(); toast('Session complete — engineering report updated.'); },
-  toQuali: () => { WK().phase = 'quali'; persist(); render(); },
+  toQuali: () => { if (WK().live) commitSession(S()); WK().phase = 'quali'; persist(); render(); },
+  liveFP: () => { const sess = createSession(S(), 'practice'); for (const c of sess.cars) if (c.isPlayer) c.prog = app.tab.prog?.[c.did] || 'setup'; persist(); render(); },
+  liveQ: () => { createSession(S(), 'quali'); persist(); render(); },
 });
 
 function qualiView(s, wk, t) {
+  if (wk.live?.kind === 'quali') return liveView(s, wk, t) + `<h3 style="margin-top:1rem">Setup — garage</h3><div class="grid g2">${setupPanel(s, wk)}</div>`;
   const pt = s.teams[s.player]; const sess = wk.quali.session;
   const names = ['Q1', 'Q2', 'Q3'];
   const plans = (wk.quali.plans ||= {});
@@ -127,7 +150,7 @@ function qualiView(s, wk, t) {
       <div class="tiny muted">Late: best track evolution, but traffic and red-flag risk. Two runs: safe, a little less evolution.</div>
       <label style="margin-top:.4rem">Push level</label><div class="seg">${[['safe', 'Safe'], ['normal', 'Normal'], ['max', 'Maximum']].map(([k, l]) => `<button class="btn sm ${p.push === k ? 'on' : ''}" data-act="qplan" data-arg="${did}:push:${k}">${l}</button>`).join('')}</div>
       <label style="margin-top:.4rem">Tyre</label><div class="seg">${['S', 'I', 'W'].map((c) => `<button class="btn sm ${p.tyre === c ? 'on' : ''}" data-act="qplan" data-arg="${did}:tyre:${c}">${COMPOUNDS[c].name}</button>`).join('')}</div></div>`; }).join('')}</div>` : '<p class="muted">Both drivers eliminated. Simulate the rest of qualifying.</p>'}
-  <div class="row" style="margin-top:.8rem"><button class="btn primary" data-act="runQuali">Run ${names[sess]}</button></div></div>${table}`;
+  <div class="row" style="margin-top:.8rem"><button class="btn primary" data-act="liveQ">▶ Go live: ${names[sess]} (${[12, 10, 8][sess]} min)</button><button class="btn" data-act="runQuali">Quick simulate ${names[sess]}</button><span class="tiny muted">Run plan applies to quick simulate; live mode is under your control.</span></div></div>${table}`;
 }
 on({
   qplan: (arg) => { const [did, k, v] = arg.split(':'); WK().quali.plans[did][k] = v; render(); },

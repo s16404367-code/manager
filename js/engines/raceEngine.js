@@ -75,7 +75,7 @@ export function lapTime(race, c, t, rng, isFirst = false) {
   lt += ((c.drv.morale ?? 70) - 70) * -0.004;
   const sd = 0.08 + (100 - c.drv.cons) * 0.012 + w * 0.25;
   lt += rng.normal(0, sd);
-  const mistakeP = (0.006 + (100 - c.drv.cons) * 0.0006) * (1 + w * 2) * m.inc;
+  const mistakeP = (0.006 + (100 - c.drv.cons) * 0.0006) * (1 + w * 2) * m.inc * (c.setupFx.mistakeMult || 1);
   if (!isFirst && rng.chance(mistakeP)) { const loss = rng.range(1.2, 4); lt += loss; c._mistake = loss; }
   return safe(lt, t.baseLap + 5);
 }
@@ -170,7 +170,8 @@ function processLap(race, c, t, rng) {
   // kerb damage due to low ride height
   if (green && rng.chance(0.0015 * (c.setupFx.damageRisk - 1) * race.scale)) applyDamage(race, c, rng, 'Floor damage over kerbs', 0.35);
   // puncture
-  if (c.tyre.wear > 88 && rng.chance((c.tyre.wear - 88) * 0.02)) {
+  const punct = 88 - (c.setupFx.punctureRisk || 0) * 8;
+  if (c.tyre.wear > punct && rng.chance((c.tyre.wear - punct) * 0.02)) {
     pushLog(race, c.lapsDone, `${c.name}: PUNCTURE!`, 'bad', c.id);
     if (c.isPlayer) radio(race, c, 'Puncture! Puncture! Boxing now.');
     c.pitReq = c.pitReq || bestCompoundFor(race, c); c._puncture = true;

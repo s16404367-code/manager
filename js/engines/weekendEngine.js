@@ -3,7 +3,7 @@ import { RNG, hashStr } from '../sim/rng.js';
 import { clamp, avg } from '../sim/util.js';
 import { trackById } from '../data/tracks.js';
 import { PERSONALITIES } from '../data/drivers.js';
-import { effectiveCar, trackScore, carDeficitSec, setupOptimum, setupQuality, setupEffects, defaultSetup, SETUP_KEYS, SETUP_LABEL } from './carModel.js';
+import { effectiveCar, trackScore, carDeficitSec, setupOptimum, setupQuality, setupEffects, defaultSetup, SETUP_KEYS, SETUP_LABEL, AI_FX } from './carModel.js';
 import { generateWeather, forecast } from './weatherEngine.js';
 import { planOptions, labelPlans, clonePlan } from './strategyEngine.js';
 import { wearPerLap, COMPOUNDS, wetPenalty } from './tyreEngine.js';
@@ -32,7 +32,7 @@ export function startWeekend(state) {
   for (const team of Object.values(state.teams)) {
     team.drivers.forEach((did, slot) => {
       const car = effectiveCar(team, slot);
-      wk.opt[did] = setupOptimum(t, car, rng);
+      wk.opt[did] = setupOptimum(t, car, rng, state.drivers[did]);
       if (team.isPlayer) {
         wk.noise[did] = Object.fromEntries(SETUP_KEYS.map((k) => [k, rng.normal(0, 1)]));
         const simB = facLvl(team, 'simulator') * 0.06 + deptQ(team, 'vd') * 0.002;
@@ -60,15 +60,11 @@ export const PRACTICE_PROGRAMS = {
   reliability: { label: 'Reliability run', desc: 'Burn-in checks: 12% lower failure risk this weekend, adds PU mileage.' },
 };
 
-export function runPractice(state, programs) {
-  const wk = state.weekend; const t = trackById(wk.trackId);
-  const rng = new RNG((wk.seed + 101 * (wk.practice.done + 1)) >>> 0);
-  const pt = state.teams[state.player];
-  const lines = [];
-  const quick = state.mode === 'quick';
-  const mult = quick ? 2.2 : 1;
-  for (const did of pt.drivers) {
-    const d = state.drivers[did]; const prog = programs[did] || 'setup';
+// Apply one practice programme's learning for a driver. mult scales the gain (1 = a full classic session).
+export function applyProgram(state, did, prog, rng, mult = 1, lines = []) {
+  const wk = state.weekend; const t = trackById(wk.trackId); const pt = state.teams[state.player];
+  if (state.mode === 'quick') mult *= 2.2;
+  const d = state.drivers[did];
     const fb = d.fb + (PERSONALITIES[d.pers]?.fbBonus || 0);
     const k = wk.knowledge[did];
     if (prog === 'setup' || prog === 'qualisim') {
@@ -101,7 +97,13 @@ export function runPractice(state, programs) {
       for (const key of SETUP_KEYS) k[key] = clamp(k[key] + 0.05, 0, 0.97);
     }
     if (prog === 'reliability') { wk.relBurn[did] = true; lines.push({ did, prog, text: `${d.name} completed reliability checks. ${pt.car.reliability < 65 ? 'Engineers flagged a marginal hydraulic pressure trace.' : 'No issues found.'}` }); }
-  }
+  return lines;
+}
+export function runPractice(state, programs) {
+  const wk = state.weekend;
+  const rng = new RNG((wk.seed + 101 * (wk.practice.done + 1)) >>> 0);
+  const pt = state.teams[state.player]; const lines = [];
+  for (const did of pt.drivers) applyProgram(state, did, programs[did] || 'setup', rng, 1, lines);
   wk.practice.done++;
   wk.practice.reports.push({ session: wk.practice.done, lines });
   return lines;
@@ -109,7 +111,7 @@ export function runPractice(state, programs) {
 function fmtFx(fx) { return Object.entries(fx || {}).filter(([, v]) => Math.abs(v) > 0.05).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v.toFixed(1)}`).join(', ') || 'no change'; }
 
 // Per-car single-lap pace for qualifying
-function qualiLap(state, team, slot, did, t, wet, rng, plan) {
+export function qualiLap(state, team, slot, did, t, wet, rng, plan) {
   const wk = state.weekend; const d = state.drivers[did];
   const car = effectiveCar(team, slot);
   const perf = carDeficitSec(trackScore(car, t).score, t);
@@ -151,6 +153,11 @@ export function runQualiSession(state, plans) {
       out.push({ did, teamId: team.id, ...r });
     });
   }
+  commitQuali(state, out, wet);
+  return out;
+}
+export function commitQuali(state, out, wet) {
+  const wk = state.weekend; const s = wk.quali.session;
   out.sort((a, b) => a.time - b.time);
   wk.quali.results[s] = out.map((o) => ({ did: o.did, teamId: o.teamId, time: o.time, notes: o.notes }));
   wk.quali.wet = wet;
@@ -158,9 +165,8 @@ export function runQualiSession(state, plans) {
   out.slice(cut).forEach((o) => wk.quali.eliminated.push(o.did));
   wk.quali.session++;
   if (wk.quali.session >= 3) buildGrid(state);
-  return out;
 }
-function buildGrid(state) {
+export function buildGrid(state) {
   const wk = state.weekend; const r = wk.quali.results;
   const order = [...r[2].map((x) => x.did)];
   for (const x of r[1]) if (!order.includes(x.did)) order.push(x.did);
@@ -211,7 +217,7 @@ export function buildRace(state) {
         plan = clonePlan(opts[idx] || opts[0]);
         // wet start
         if (wk.weather.wet[0] > 0.16) plan.start = wk.weather.wet[0] > 0.6 ? 'W' : 'I';
-        setupQ = aiSetupQ(team, rng); setupFx = { wearMult: 1, frontBias: 0, damageRisk: 1, topSpeed: 0 };
+        setupQ = aiSetupQ(team, rng); setupFx = { ...AI_FX };
       }
       if (team.isPlayer && wk.weather.wet[0] > 0.16 && ['S', 'M', 'H'].includes(plan.start) && wk.startTyre?.[did] == null) {/* player chose */}
       if (team.isPlayer && wk.startTyre?.[did]) plan.start = wk.startTyre[did];

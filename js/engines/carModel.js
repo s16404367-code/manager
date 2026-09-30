@@ -25,38 +25,68 @@ export function trackScore(car, t) {
 }
 export const carDeficitSec = (score, t) => (100 - score) * 0.055 * (t.baseLap / 85);
 
-export const SETUP_KEYS = ['wing', 'ride', 'susp', 'balance', 'diff'];
-export const SETUP_LABEL = { wing: 'Wing level', ride: 'Ride height', susp: 'Suspension stiffness', balance: 'Aero balance (F←→R)', diff: 'Differential lock' };
+export const SETUP_KEYS = ['frontWing', 'rearWing', 'ride', 'springs', 'arb', 'camber', 'toe', 'brakeBias', 'diff', 'pressure'];
+export const SETUP_GROUPS = [['Aerodynamics', ['frontWing', 'rearWing', 'ride']], ['Suspension', ['springs', 'arb', 'camber', 'toe']], ['Brakes, diff & tyres', ['brakeBias', 'diff', 'pressure']]];
+export const SETUP_LABEL = { frontWing: 'Front wing angle', rearWing: 'Rear wing angle', ride: 'Ride height', springs: 'Spring stiffness', arb: 'Anti-roll bars (F←→R)', camber: 'Camber', toe: 'Toe', brakeBias: 'Brake bias (rear←→front)', diff: 'Differential lock', pressure: 'Tyre pressure' };
 export const SETUP_HINT = {
-  wing: 'More wing = more cornering grip, less top speed and weaker DRS attack.',
-  ride: 'Lower = more downforce, but bottoming/kerb damage risk rises.',
-  susp: 'Stiffer = better aero platform, higher tyre wear and kerb sensitivity.',
-  balance: 'Forward balance stresses fronts; rearward stresses rears.',
-  diff: 'More lock = better traction, more rear tyre wear & understeer.',
+  frontWing: 'More front wing = sharper turn-in (oversteer). Aggressive drivers like a pointy front.',
+  rearWing: 'More rear wing = more downforce & stability, less top speed and weaker DRS attack.',
+  ride: 'Lower = more floor downforce, but bottoming & kerb damage risk rises on bumpy tracks.',
+  springs: 'Stiffer = stable aero platform & response; worse over kerbs/bumps, more tyre wear.',
+  arb: 'Front-biased roll stiffness = understeer & front wear; rear-biased = oversteer & rear wear.',
+  camber: 'More negative camber = more cornering grip, more tyre wear.',
+  toe: 'More toe = stability and turn-in; costs a little drag and tyre temperature.',
+  brakeBias: 'Forward bias = stable braking; wrong bias causes lock-ups and mistakes.',
+  diff: 'More lock = traction out of slow corners; more rear wear and understeer mid-corner.',
+  pressure: 'Lower pressure = grip & warm-up; too low risks overheating, wear and punctures.',
 };
-// Hidden optimum for a car at a track (event noise from rng).
-export function setupOptimum(t, car, rng) {
-  const n = () => (rng ? rng.normal(0, 1.6) : 0);
+const W = { frontWing: 1, rearWing: 1.2, ride: 1, springs: 0.8, arb: 0.7, camber: 0.8, toe: 0.5, brakeBias: 0.6, diff: 0.7, pressure: 0.8 };
+const STYLE = { aggressive: 1, independent: 0.5, teamplayer: 0, technical: 0, lowinfo: -0.3, conservative: -1 }; // +: likes oversteer
+export function driverStyle(d) { return STYLE[d?.pers] ?? 0; }
+// Hidden optimum for a car + driver at a track (event noise from rng).
+export function setupOptimum(t, car, rng, driver = null) {
+  const n = () => (rng ? rng.normal(0, 1.3) : 0); const st = driverStyle(driver);
+  const rw = clamp(1 + 8 * (t.df * 0.75 + (1 - t.drag) * 0.25) + (car.dragEff - 70) * 0.03 + n(), 0, 10);
   return {
-    wing: clamp(1 + 8 * (t.df * 0.7 + (1 - t.drag) * 0.3) + (car.dragEff - 70) * 0.03 + n(), 0, 10),
+    rearWing: rw,
+    frontWing: clamp(rw + (t.rstress - t.fstress) * 2 + st * 1.1 + (car.highAero - car.lowAero) * 0.04 + n(), 0, 10),
     ride: clamp(2 + 6 * (1 - t.ride) + n(), 0, 10),
-    susp: clamp(3 + 5 * (t.high * 0.6 + (1 - t.kerb) * 0.4) + n(), 0, 10),
-    balance: clamp(5 + (t.rstress - t.fstress) * 4 + (car.highAero - car.lowAero) * 0.05 + n(), 0, 10),
+    springs: clamp(3 + 5 * (t.high * 0.6 + (1 - t.kerb) * 0.4) + n(), 0, 10),
+    arb: clamp(5 + (t.rstress - t.fstress) * 3 + st * 0.6 + n(), 0, 10),
+    camber: clamp(3 + 5 * (t.high * 0.5 + t.med * 0.3) - t.deg * 2 + 1 + n(), 0, 10),
+    toe: clamp(5 - t.drag * 3 + t.low * 2 - st * 0.5 + n(), 0, 10),
+    brakeBias: clamp(5 + (t.brake - 0.5) * 3 - st * 0.4 + n() * 0.7, 0, 10),
     diff: clamp(3 + 5 * t.trac - (car.traction - 70) * 0.03 + n(), 0, 10),
+    pressure: clamp(3.5 + t.deg * 2.5 + t.high * 2 + t.temp * 1 + n(), 0, 10),
   };
 }
 export function setupQuality(setup, opt) {
-  let e = 0; for (const k of SETUP_KEYS) e += ((setup[k] - opt[k]) / 4) ** 2;
-  return clamp(1 - e / SETUP_KEYS.length * 1.6, 0, 1);
+  let e = 0, w = 0; for (const k of SETUP_KEYS) { e += W[k] * (((setup[k] ?? 5) - opt[k]) / 4) ** 2; w += W[k]; }
+  return clamp(1 - (e / w) * 1.6, 0, 1);
 }
 // Secondary setup effects (trade-offs beyond pure quality)
 export function setupEffects(setup, opt, t) {
-  const d = (k) => setup[k] - opt[k];
+  const d = (k) => (setup[k] ?? 5) - opt[k];
   return {
-    wearMult: clamp(1 + Math.max(0, d('susp')) * 0.03 + Math.max(0, d('diff')) * 0.02, 0.9, 1.35),
-    frontBias: clamp(-d('balance') * 0.04, -0.3, 0.3),
-    damageRisk: clamp(1 + Math.max(0, -d('ride')) * 0.35 * (0.5 + t.kerb), 1, 3),
-    topSpeed: clamp(-d('wing') * 0.012, -0.12, 0.12), // + => better straight-line / DRS
+    wearMult: clamp(1 + Math.max(0, d('springs')) * 0.025 + Math.max(0, d('diff')) * 0.02 + Math.max(0, d('camber')) * 0.03 + Math.max(0, -d('pressure')) * 0.03, 0.85, 1.45),
+    frontBias: clamp(-(d('frontWing') - d('rearWing')) * 0.025 - d('arb') * 0.02, -0.3, 0.3),
+    damageRisk: clamp(1 + Math.max(0, -d('ride')) * 0.35 * (0.5 + t.kerb) + Math.max(0, d('springs')) * 0.1 * t.kerb, 1, 3),
+    topSpeed: clamp(-(d('rearWing') * 0.7 + d('frontWing') * 0.3) * 0.012 - Math.max(0, d('toe')) * 0.003, -0.14, 0.14),
+    mistakeMult: clamp(1 + Math.abs(d('brakeBias')) * 0.07 + Math.abs(d('toe')) * 0.03, 1, 1.8),
+    punctureRisk: clamp(Math.max(0, -d('pressure')) * 0.25, 0, 1.5),
   };
 }
-export function defaultSetup() { return { wing: 5, ride: 5, susp: 5, balance: 5, diff: 5 }; }
+// Observable characteristics of a setup (what the car "feels like"), 0..100 — independent of the hidden optimum.
+export function setupCharacter(s) {
+  const g = (k) => s[k] ?? 5;
+  return {
+    'Top speed': clamp(80 - (g('rearWing') * 5 + g('frontWing') * 2) + (10 - g('toe')) * 1 + 20, 0, 100),
+    Cornering: clamp((g('rearWing') + g('frontWing')) * 3.5 + (10 - g('ride')) * 2 + g('camber') * 2 + g('springs') * 1, 0, 100),
+    'Tyre life': clamp(100 - g('springs') * 3 - g('camber') * 3.5 - g('diff') * 2 + g('pressure') * 2.5 - 10, 0, 100),
+    Stability: clamp(g('toe') * 4 + g('rearWing') * 3 + (10 - Math.abs(g('frontWing') - g('rearWing')) * 3) + g('brakeBias') * 2, 0, 100),
+    'Kerb riding': clamp(g('ride') * 5 + (10 - g('springs')) * 4 + 10, 0, 100),
+    Balance: clamp(50 + (g('frontWing') - g('rearWing')) * 6 + (5 - g('arb')) * 4, 0, 100), // >50 oversteer
+  };
+}
+export function defaultSetup() { return Object.fromEntries(SETUP_KEYS.map((k) => [k, 5])); }
+export const AI_FX = { wearMult: 1, frontBias: 0, damageRisk: 1, topSpeed: 0, mistakeMult: 1, punctureRisk: 0 };

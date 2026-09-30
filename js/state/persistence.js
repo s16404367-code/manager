@@ -1,5 +1,6 @@
 // Save system: versioned, validated, with migrations, backups, slot metadata and export/import.
 import { SAVE_VERSION } from '../engines/world.js';
+import { TRACKS } from '../data/tracks.js';
 const KEY = 'f1tp3';
 export const SLOTS = ['auto', 'slot1', 'slot2', 'slot3'];
 const store = (() => { try { const t = '__t'; localStorage.setItem(t, t); localStorage.removeItem(t); return localStorage; } catch { const m = {}; return { getItem: (k) => m[k] ?? null, setItem: (k, v) => { m[k] = String(v); }, removeItem: (k) => { delete m[k]; } }; } })();
@@ -36,6 +37,13 @@ export function migrate(data) {
   if (!s.version) s.version = 1;
   if (s.version < 2) { s.news ||= []; s.version = 2; }
   if (s.version < 3) { s.achievements ||= {}; s.history ||= { seasons: [] }; s.version = 3; }
+  if (s.version < 4) {
+    // v3.1: real 2026 calendar + 10-parameter setup. Remap unknown circuits, drop an in-progress weekend.
+    const ids = TRACKS.map((t) => t.id);
+    if (Array.isArray(s.calendar)) s.calendar = s.calendar.map((id, i) => (ids.includes(id) ? id : ids[Math.floor((i * ids.length) / s.calendar.length)]));
+    if (s.weekend && (!ids.includes(s.weekend.trackId) || !('toe' in (Object.values(s.weekend.setups || {})[0] || { toe: 1 })))) s.weekend = null;
+    s.version = 4;
+  }
   return s;
 }
 function strip(state) {

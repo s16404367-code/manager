@@ -38,3 +38,22 @@ python3 -m http.server 8080      # or: npx serve .
 | CI / Pages deploy | GitHub Actions YAML |
 
 See `docs/` for the architecture, game design notes and the QA checklist.
+
+## v3.1 — Real 2026 calendar, live sessions, new UI
+
+- **24 real circuits** of the 2026 F1 calendar (Melbourne → Abu Dhabi, including Madring). The layouts come from
+  [bacinger/f1-circuits](https://github.com/bacinger/f1-circuits) (MIT License, © Tomislav Bacinger). A speed profile is
+  computed from each circuit's corner radii, and it drives car positions and telemetry. Teams and drivers are still fictional.
+- **Live practice and qualifying**: a session clock, out-laps, flying laps and in-laps, live timing with sector colours
+  (purple/green/yellow), a telemetry trace, traffic, track-limits deletions and track evolution. Q1 is 12 min, Q2 10 min and Q3 8 min.
+  "Quick simulate" is still available.
+- **10-parameter setup** (wings, ride height, springs, anti-roll bars, camber, toe, brake bias, diff, tyre pressure). The optimum
+  depends on the track and the driver's style. Live meters show the car's predicted character.
+- A new visual theme and race telemetry: tap any car in the timing tower to see its data.
+
+### Run in GitHub Codespaces
+```bash
+unzip team-principal-v3.1.zip -d . && cd f1tp   # if you uploaded the zip
+python3 -m http.server 8080                      # then open the forwarded port 8080 (Ports tab → globe icon)
+node tests/run-tests.mjs                          # headless engine tests
+```
