@@ -124,3 +124,20 @@ tr.me td{background:color-mix(in srgb,var(--team) 14%,transparent)!important;fon
 .modal{border-top:3px solid var(--accent);background:linear-gradient(180deg,rgba(255,255,255,.03),transparent 30%),var(--panel)}
 .bottomnav{background:linear-gradient(0deg,#06080c,rgba(12,16,24,.97))!important;box-shadow:0 -2px 0 var(--team)}
 .bottomnav a.on{color:#fff}.bottomnav a.on .i{filter:drop-shadow(0 0 6px var(--team))}
+/* v3.4 */
+.mapwrap{max-width:560px;margin-left:auto;margin-right:auto;max-height:52vh;display:flex;flex-direction:column}
+.mapwrap svg.trackmap{flex:1;min-height:0;max-height:calc(52vh - 30px)}
+.flag.drs-on{background:#0d3b66;color:#9dd0ff}.flag.drs-off{background:#2a2f3a;color:#8a94a8}
+.flag.sc{animation:scpulse 1s infinite alternate}@keyframes scpulse{to{box-shadow:0 0 14px #ffd400}}
+.days{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;margin:.2rem 0 .9rem}
+.day{background:linear-gradient(160deg,rgba(255,255,255,.05),transparent 60%),var(--panel);border:1px solid var(--line);border-radius:14px;padding:.6rem .8rem;display:grid;grid-template-columns:auto 1fr;grid-template-areas:"dh de" "dl de" "dt dt";gap:.1rem .6rem;position:relative;overflow:hidden}
+.day.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset,0 10px 30px rgba(225,6,0,.15)}
+.day.on::after{content:"TODAY";position:absolute;right:.5rem;top:.4rem;font-size:.6rem;font-weight:900;letter-spacing:.12em;color:var(--accent)}
+.day .dh{grid-area:dh;display:flex;flex-direction:column}.day .dh b{font-size:1rem;font-style:italic;text-transform:uppercase}.day .dh span{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+.day .de{grid-area:de;font-size:2.2rem;justify-self:end;align-self:center}
+.day .dl{grid-area:dl;font-size:.85rem;font-weight:700}
+.day .dt{grid-area:dt;display:flex;gap:.8rem;font-size:.72rem;color:var(--muted);margin-top:.3rem;border-top:1px solid var(--line);padding-top:.3rem}.day .dt b{color:#fff}
+.trackmap .cdot circle{filter:drop-shadow(0 0 1.2px rgba(0,0,0,.9))}
+.carpanel{background:linear-gradient(160deg,rgba(255,255,255,.035),transparent 50%),var(--panel2);border-radius:12px}
+.carpanel .hd{border-bottom:1px solid var(--line);padding-bottom:.4rem}
+@media (max-width:700px){.days{grid-template-columns:1fr}}

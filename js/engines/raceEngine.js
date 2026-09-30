@@ -220,7 +220,7 @@ function processLap(race, c, t, rng) {
 function resolveBattle(race, c, ahead, end, t, rng) {
   const gap = c.total - ahead.total;
   const pace = (ahead.lapEnd - ahead.lapStart) - (end - c.lapEnd);
-  const drs = gap < 1.0 && race.lap > 2 && race.wetness < 0.3;
+  const drs = gap < 1.0 && drsOn(race);
   const pers = PERSONALITIES[c.drv.pers] || PERSONALITIES.teamplayer;
   if (c.orders === 'hold' && ahead.teamId === c.teamId) return ahead.lapEnd + 0.6;
   if (pace > 3 || ahead._pitLap) return Math.min(end, ahead.lapEnd - 0.2); // car ahead pitting / crippled
@@ -282,7 +282,7 @@ function onLeaderLap(race, leader, t, rng) {
   race.lapChart.push(updateOrder(race).map((c) => c.id));
   if (race.sc.state !== 'none') {
     race.sc.lapsLeft--;
-    if (race.sc.lapsLeft <= 0) { pushLog(race, race.lap, race.sc.state === 'sc' ? 'Safety car in this lap — green flag!' : 'VSC ending — green flag!', 'info'); race.sc.state = 'none'; }
+    if (race.sc.lapsLeft <= 0) { pushLog(race, race.lap, race.sc.state === 'sc' ? 'Safety car in this lap — green flag!' : 'VSC ending — green flag!', 'info'); race.sc.state = 'none'; race.drsFrom = race.lap + 2; pushLog(race, race.lap, 'DRS disabled — enabled again in 2 laps.', 'muted'); }
   } else if (race.lap > 1 && race.lap < race.laps - 2 && rng.chance(t.sc * 0.006 * race.scale)) {
     deploySC(race, rng.chance(0.5) ? 'vsc' : 'sc', rng, 'debris on track');
   }
@@ -378,6 +378,8 @@ function teamOrderCheck(race, c, t) {
   }
 }
 
+// DRS: disabled on laps 1–2, under SC/VSC, for 2 laps after a restart, and on a wet track.
+export function drsOn(race) { return race.sc.state === 'none' && race.lap > 2 && race.lap >= (race.drsFrom || 0) && race.wetness < 0.3; }
 export function raise(race, p) { race.pending.push({ ...p, id: race.pending.length + '_' + race.lap, lap: race.lap, shown: false }); }
 
 function finishRace(race) {

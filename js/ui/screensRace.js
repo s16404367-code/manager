@@ -1,7 +1,7 @@
 // Live Race Control: timing tower, minimap, pit wall controls, radio, critical-event decisions.
 import { updateSettings, app, screen, on, go, esc, persist, toast, render, modal, closeModal, confirmBox } from './app.js';
 import { trackById, trackPath } from '../data/tracks.js';
-import { advance, actions, carById, updateOrder, MODES, ERS_MODES } from '../engines/raceEngine.js';
+import { drsOn, advance, actions, carById, updateOrder, MODES, ERS_MODES } from '../engines/raceEngine.js';
 import { classify } from '../engines/weekendEngine.js';
 import { COMPOUNDS } from '../engines/tyreEngine.js';
 import { wetLabel } from '../engines/weatherEngine.js';
@@ -142,8 +142,9 @@ function drawMap(race, len, trk) {
     if (inPit) placeCarAt(c.id, pitPoint(trk.pts, entering ? (d - 0.955) / 0.09 : (d + 0.045) / 0.09)); else placeCar(trk.pts, c.id, d);
     if (c.id === sel || c.id === selB) {
       const k = race.sc.state === 'sc' ? 1.45 : race.sc.state === 'vsc' ? 1.3 : 1;
-      const drs = race.sc.state === 'none' && race.lap > 2 && (app._iv?.[c.id] ?? 9) < 1;
-      updateTele(trk.t, c.id === sel ? 'rtele' : 'rtele2', `<span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b> <span class="muted">P${c.pos} · L${Math.min(c.lapsDone + 1, race.laps)}${inPit ? ' · PIT LANE' : ''}</span>`, f, { k, state: c.finished ? 'garage' : inPit ? 'pit' : 'track', drs });
+      const drs = drsOn(race) && (app._iv?.[c.id] ?? 9) < 1;
+      const cap = race.sc.state === 'sc' ? 175 : race.sc.state === 'vsc' ? 215 : null;
+      updateTele(trk.t, c.id === sel ? 'rtele' : 'rtele2', `<span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b> <span class="muted">P${c.pos} · L${Math.min(c.lapsDone + 1, race.laps)}${inPit ? ' · PIT LANE' : ''}${cap ? ` · <b style="color:#ffd400">${race.sc.state === 'sc' ? 'SC — no overtaking, DRS off' : 'VSC — delta speed, DRS off'}</b>` : ''}</span>`, f, { k, state: c.finished ? 'garage' : inPit ? 'pit' : 'track', drs, cap });
     }
   }
   const sc = document.getElementById('scCar');
@@ -165,7 +166,7 @@ function drawBar(race, st) {
   const el = document.getElementById('racebar'); if (!el) return;
   const flag = race.finished ? '<span class="flag chk">🏁 FINISHED</span>' : race.sc.state === 'sc' ? '<span class="flag sc">SAFETY CAR</span>' : race.sc.state === 'vsc' ? '<span class="flag vsc">VSC</span>' : '<span class="flag green">GREEN</span>';
   const sp = app.settings.speed;
-  const html = `<span class="lap mono">L${Math.min(race.lap, race.laps)}/${race.laps}</span>${flag}<span class="small">${wetLabel(race.wetness)}${race.wetness > 0.05 ? ` (${Math.round(race.wetness * 100)}%)` : ''}</span>
+  const html = `<span class="lap mono">L${Math.min(race.lap, race.laps)}/${race.laps}</span>${flag}<span class="flag ${drsOn(race) ? 'drs-on' : 'drs-off'}">DRS ${drsOn(race) ? 'ENABLED' : 'DISABLED'}</span><span class="small">${wetLabel(race.wetness)}${race.wetness > 0.05 ? ` (${Math.round(race.wetness * 100)}%)` : ''}</span>
   <span class="sp"></span>
   ${race.finished ? `<button class="btn primary" data-act="toDebrief">Race debrief →</button>` : `<div class="row speed" role="group" aria-label="Simulation speed"><button class="btn sm ${st?.running ? '' : 'on'}" data-tap="rpause" aria-label="Pause">${st?.running ? '⏸' : '▶'}</button>
   ${Object.entries({ normal: '1×', fast: '3×', vfast: '9×' }).map(([k, l]) => `<button class="btn sm ${sp === k ? 'on' : ''}" data-tap="rspeed" data-arg="${k}">${l}</button>`).join('')}<button class="btn sm ghost" data-act="rskip" title="Let the engineers run the rest">⏭</button></div>`}`;

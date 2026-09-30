@@ -44,8 +44,17 @@ export function startWeekend(state) {
     });
   }
   // Race-day tyre behaviour can differ from Friday: temperature swing, track rubbering, wind, rain washing rubber away.
+  // Three different days: Friday (practice), Saturday (qualifying), Sunday (race)
+  const dayT = (d) => Math.round(weather.airTemp + rng.normal(0, 2.5) + d);
+  const fpWet = rng.chance(t.wx * 0.3) ? rng.range(0.15, 0.75) : 0;
+  const friAir = dayT(-1), satAir = dayT(0);
+  wk.days = [
+    { day: 'Friday', what: 'Practice', wet: fpWet, air: friAir, track: friAir + Math.round(rng.range(6, 14) * (fpWet ? 0.4 : 1)), wind: Math.round(rng.range(3, 25)) },
+    { day: 'Saturday', what: 'Qualifying', wet: qWet, air: satAir, track: satAir + Math.round(rng.range(6, 14) * (qWet ? 0.4 : 1)), wind: Math.round(rng.range(3, 25)) },
+    { day: 'Sunday', what: 'Race', wet: weather.wet[0], rainLater: Math.max(...weather.wet), air: weather.airTemp, track: weather.trackTemp, wind: Math.round(rng.range(3, 25)) },
+  ];
   const rainy = weather.wet.some((w) => w > 0.12);
-  wk.raceDeg = clamp(1 + rng.normal(0, 0.11) + (weather.trackTemp - 35) * 0.004 + (rainy ? rng.range(-0.08, 0.1) : 0), 0.78, 1.3);
+  wk.raceDeg = clamp(1 + rng.normal(0, 0.11) + (weather.trackTemp - wk.days[0].track) * 0.006 + (weather.trackTemp - 35) * 0.002 + (rainy ? rng.range(-0.08, 0.1) : 0), 0.78, 1.3);
   for (const did of pt.drivers) { wk.know[did] = clamp(0.25 + facLvl(pt, 'simulator') * 0.05 + (state.drivers[did].age > 27 ? 0.1 : 0), 0, 0.6); ensurePC(pt); }
   state.setupPenalty = 0;
   state.weekend = wk;

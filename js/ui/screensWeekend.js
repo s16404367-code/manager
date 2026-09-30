@@ -29,6 +29,11 @@ function fieldRank(s, t) {
   return rows.findIndex((r) => r.id === s.player) + 1;
 }
 const WX = (p) => p < 15 ? ['☀️', 'Dry', '#f5b642'] : p < 35 ? ['🌤️', 'Mostly dry', '#c9b35a'] : p < 55 ? ['🌦️', 'Showers possible', '#6fb3ff'] : p < 75 ? ['🌧️', 'Rain likely', '#3b82f6'] : ['⛈️', 'Heavy rain', '#6d5bff'];
+export function daysStrip(wk, hi = null) {
+  if (!wk.days) return '';
+  const ic = (d) => { const w = Math.max(d.wet, d.rainLater || 0); return d.wet > 0.6 ? ['⛈️', 'Heavy rain'] : d.wet > 0.15 ? ['🌧️', 'Wet'] : (d.rainLater || 0) > 0.15 ? ['🌦️', 'Dry start, rain later'] : d.air > 30 ? ['🔥', 'Hot & dry'] : w === 0 && d.air < 18 ? ['🌥️', 'Cool & dry'] : ['☀️', 'Dry']; };
+  return `<div class="days">${wk.days.map((d, i) => { const [e, l] = ic(d); return `<div class="day ${hi === i ? 'on' : ''}"><div class="dh"><b>${d.day}</b><span>${d.what}</span></div><div class="de">${e}</div><div class="dl">${l}</div><div class="dt"><span>Air <b>${d.air}°</b></span><span>Track <b>${d.track}°</b></span><span>Wind <b>${d.wind}</b> km/h</span></div></div>`; }).join('')}</div>`;
+}
 function forecastStrip(wk) {
   const conf = wk.forecastAcc > 0.8 ? 'high' : wk.forecastAcc > 0.6 ? 'moderate' : 'low';
   return `<div class="wxcards">${wk.forecast.map((f) => { const [ic, lab, col] = WX(f.prob); return `<div class="wxc" style="border-top-color:${col}" title="Laps ${f.from}–${f.to}: ${lab}, ${f.prob}% ±${f.unc}%"><div class="wxi">${ic}</div><b>${f.prob}%</b><span class="tiny muted">L${f.from}–${f.to}</span></div>`; }).join('')}</div>
@@ -102,7 +107,7 @@ function prepView(s, wk, t) {
     <p>Engineers estimate our pace rank here: <b>P${clamp(rank - unc, 1, 10)}–P${clamp(rank + unc, 1, 10)}</b> of 10 teams.</p>
     <div class="small">Cornering (weighted) ${bar(b.corner, 110)}Straight-line ${bar(b.straight, 110)}Mechanical/traction ${bar(b.mech, 110)}Braking ${bar(b.braking, 110)}</div>
     ${b.coolPen > 0.3 ? `<div class="alert warn small">Cooling demand exceeds our package: expect a power de-rate (≈${b.coolPen.toFixed(1)} pts).</div>` : ''}
-    <h4 style="margin-top:.8rem">Weather forecast</h4>${forecastStrip(wk)}
+    <h4 style="margin-top:.8rem">Weekend weather — 3 days</h4>${daysStrip(wk)}<p class="tiny muted">Different days, different grip. Friday's tyre data may not match Sunday if the temperature changes.</p><h4 style="margin-top:.6rem">Race (Sunday) — rain chance by lap</h4>${forecastStrip(wk)}
     <div class="small">Air ${wk.weather.airTemp}°C · Track ~${wk.weather.trackTemp}°C · Qualifying rain chance ~${wk.qForecast}%</div></div>
   </div>
   <h3 style="margin-top:1rem">Initial setup</h3><p class="small muted">Start from the simulator estimate. Practice sharpens the estimate; the true optimum is hidden.</p>
@@ -115,11 +120,11 @@ on({
 });
 
 function practiceView(s, wk, t) {
-  if (wk.live?.kind === 'practice') return liveView(s, wk, t) + `<h3 style="margin-top:1rem">Setup — garage</h3><div class="grid g2">${setupPanel(s, wk)}</div>`;
+  if (wk.live?.kind === 'practice') return daysStrip(wk, 0) + liveView(s, wk, t) + `<h3 style="margin-top:1rem">Setup — garage</h3><div class="grid g2">${setupPanel(s, wk)}</div>`;
   const pt = s.teams[s.player];
   const left = wk.practice.total - wk.practice.done;
   app.tab.prog ||= {};
-  return `<div class="card"><div class="row"><h3 style="margin:0">Free Practice ${Math.min(wk.practice.done + 1, wk.practice.total)} / ${wk.practice.total}</h3><span class="sp"></span>${left ? '' : pill('All sessions complete', 'good')}</div>
+  return `${daysStrip(wk, 0)}<div class="card"><div class="row"><h3 style="margin:0">Free Practice ${Math.min(wk.practice.done + 1, wk.practice.total)} / ${wk.practice.total}</h3><span class="sp"></span>${left ? '' : pill('All sessions complete', 'good')}</div>
     <p class="small muted">Go live to run the session yourself — send cars out, pick programmes and tyres, change the setup between runs, and watch live timing and telemetry. Or pick a programme per driver and quick-simulate.</p>
     <div class="grid g2">${pt.drivers.map((did) => { const cur = app.tab.prog[did] || 'setup'; return `<div><b>${esc(s.drivers[did].name)}</b><div class="col" style="margin-top:.4rem">${Object.entries(PRACTICE_PROGRAMS).map(([k, p]) => `<button class="choice ${cur === k ? 'on' : ''}" data-act="prog" data-arg="${did}:${k}"><b class="small">${p.label}</b><div class="tiny muted">${p.desc}</div></button>`).join('')}</div></div>`; }).join('')}</div>
     <div class="row" style="margin-top:.8rem"><button class="btn primary" data-act="liveFP" ${left ? '' : 'disabled'}>▶ Go live (telemetry)</button><button class="btn" data-act="runPractice" ${left ? '' : 'disabled'}>Quick simulate</button><span class="sp"></span><button class="btn" data-act="toQuali">Go to qualifying →</button></div></div>
@@ -135,7 +140,7 @@ on({
 });
 
 function qualiView(s, wk, t) {
-  if (wk.live?.kind === 'quali') return liveView(s, wk, t) + `<h3 style="margin-top:1rem">Setup — garage</h3><div class="grid g2">${setupPanel(s, wk)}</div>`;
+  if (wk.live?.kind === 'quali') return daysStrip(wk, 1) + liveView(s, wk, t) + `<h3 style="margin-top:1rem">Setup — garage</h3><div class="grid g2">${setupPanel(s, wk)}</div>`;
   const pt = s.teams[s.player]; const sess = wk.quali.session;
   const names = ['Q1', 'Q2', 'Q3'];
   const plans = (wk.quali.plans ||= {});
@@ -146,7 +151,7 @@ function qualiView(s, wk, t) {
   if (sess >= 3) {
     return `<div class="card"><h3>Qualifying complete — starting grid</h3><ol class="small" style="columns:2">${wk.grid.map((did) => { const d = s.drivers[did]; const tm = s.teams[d.teamId]; return `<li style="${tm.isPlayer ? 'font-weight:700' : ''}"><span class="sw" style="background:${tm.color}"></span>${esc(d.name)}${wk.gridPens?.[did] ? ' <span class="bad">(+' + wk.gridPens[did] + ' pen)</span>' : ''}</li>`; }).join('')}</ol><button class="btn primary" data-act="toStrategy">Strategy Lab →</button></div>${table}`;
   }
-  return `${wetText}<div class="card"><h3>${names[sess]} ${helpBtn('quali')}</h3>
+  return `${daysStrip(wk, 1)}${wetText}<div class="card"><h3>${names[sess]} ${helpBtn('quali')}</h3>
   ${inSession.length ? `<div class="grid g2">${inSession.map((did) => { const p = (plans[did] ||= { run: 'banker', push: 'normal', tyre: wk.qWet > 0.6 ? 'W' : wk.qWet > 0.16 ? 'I' : 'S' }); return `<div class="card tight"><b>${esc(s.drivers[did].name)}</b>
       <label style="margin-top:.4rem">Run plan</label><div class="seg">${[['banker', 'Two runs (banker)'], ['early', 'Early run'], ['late', 'Single late run']].map(([k, l]) => `<button class="btn sm ${p.run === k ? 'on' : ''}" data-act="qplan" data-arg="${did}:run:${k}">${l}</button>`).join('')}</div>
       <div class="tiny muted">Late: best track evolution, but traffic and red-flag risk. Two runs: safe, a little less evolution.</div>
@@ -166,7 +171,7 @@ function strategyView(s, wk, t) {
   const stratQ = deptQ(pt, 'strat');
   const wetStart = wk.weather.wet[0] > 0.16;
   const rivals = wk.grid.filter((d) => s.drivers[d].teamId !== s.player).slice(0, 6);
-  return `<div class="grid g2">${pt.drivers.map((did) => {
+  return `${daysStrip(wk, 2)}<div class="grid g2">${pt.drivers.map((did) => {
     const ctx = strategyContext(s, did); const opts = planOptions(ctx); const lab = labelPlans(opts);
     const cur = wk.strategy[did]; const fuel = wk.fuel[did] ?? 1;
     const stints = ['S', 'M', 'H'].map((c) => `${tyreBadge(c)} ~${estimateStint(c, t, ctx.car, ctx.driver, wk.scale)} laps`).join(' &nbsp; ');

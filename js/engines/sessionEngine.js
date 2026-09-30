@@ -29,7 +29,7 @@ export function createSession(state, kind) {
   const wk = state.weekend; const t = trackById(wk.trackId);
   const idx = kind === 'quali' ? wk.quali.session : wk.practice.done;
   const rng = new RNG((wk.seed + (kind === 'quali' ? 9001 : 5003) * (idx + 1)) >>> 0);
-  const wet = kind === 'quali' ? clamp(wk.qWet + rng.normal(0, 0.05) * (wk.qWet > 0 ? 1 : 0), 0, 1) : clamp(wk.weather.wet[0] * 0.7, 0, 1);
+  const wet = kind === 'quali' ? clamp(wk.qWet + rng.normal(0, 0.05) * (wk.qWet > 0 ? 1 : 0), 0, 1) : clamp((wk.days?.[0]?.wet ?? wk.weather.wet[0] * 0.7) + (wk.days?.[0]?.wet ? rng.normal(0, 0.06) : 0), 0, 1);
   const dryTyre = wet > 0.6 ? 'W' : wet > 0.16 ? 'I' : 'S';
   const sess = { kind, idx, len: kind === 'quali' ? Q_LEN[idx] : FP_LEN, clock: 0, wet, flag: false, done: false, rngState: rng.s ?? null, seed: rng.next() * 1e9 >>> 0, cars: [], log: [], bestS: [1e9, 1e9, 1e9], best: 1e9, lapNo: 0 };
   for (const team of Object.values(state.teams)) {
