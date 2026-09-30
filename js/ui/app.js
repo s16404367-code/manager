@@ -49,7 +49,7 @@ const NAV = [
   ['Technical', [['car', 'Car & Development', '🔧'], ['facilities', 'Facilities', '🏭'], ['regulations', 'Regulations', '📜']]],
   ['People', [['staff', 'Staff & Departments', '👥'], ['drivers', 'Drivers & Academy', '🧑‍✈️']]],
   ['Business', [['finance', 'Finance', '💰'], ['sponsors', 'Sponsors', '🤝'], ['board', 'Board', '🏛️']]],
-  ['Game', [['history', 'Race History', '📈'], ['achievements', 'Achievements', '⭐'], ['help', 'Help', '❔'], ['settings', 'Settings', '⚙️'], ['saves', 'Save / Load', '💾']]],
+  ['Game', [['history', 'Race History', '📈'], ['achievements', 'Achievements', '⭐'], ['guide', 'Guide (what is what)', '📘'], ['help', 'Help', '❔'], ['settings', 'Settings', '⚙️'], ['saves', 'Save / Load', '💾']]],
 ];
 const QUICK_NAV = [['Race', [['weekend', 'Race Weekend', '🏁']]], ['Game', [['help', 'Help', '❔'], ['settings', 'Settings', '⚙️']]]];
 const BOTTOM = [['hq', 'HQ', '🏠'], ['weekend', 'Weekend', '🏁'], ['car', 'Car', '🔧'], ['championship', 'Standings', '🏆']];
@@ -65,9 +65,10 @@ function shell(inner) {
   return `<header class="topbar">
     <a class="brand" href="#/${quick ? 'weekend' : 'hq'}" style="text-decoration:none;color:inherit"><span class="logo">${esc(t.abbr)}</span><span class="hide-m">${esc(t.name)}</span></a>
     <div class="topstats">
-      ${quick ? `<div class="s"><span>Quick Race</span>${esc(nextTrack?.name || '')}</div>` : `<div class="s"><span>Season ${s.season}</span>${s.year} · R${Math.min(s.round + 1, s.calendar.length)}/${s.calendar.length}</div>
+      ${quick ? `<div class="s"><span>Quick Race</span>${esc(nextTrack?.name || '')}</div>` : `<div class="s"><span>Season ${s.season}</span>${s.year} · R${Math.min(s.round + 1, s.calendar.length)}/${s.calendar.length}${s.week ? ' · Wk ' + s.week : ''}</div>
       <div class="s"><span>Cash</span><b class="${t.cash < 0 ? 'bad' : ''}">${money(t.cash)}</b></div>
       <div class="s hide-m"><span>Board</span><b class="${s.board.confidence < 30 ? 'bad' : s.board.confidence < 50 ? 'warn' : 'good'}">${Math.round(s.board.confidence)}%</b></div>`}
+      ${!quick ? '<button class="btn sm ghost" data-act="guidePage" title="Explain this page" aria-label="Explain this page">📘<span class="hide-m"> Guide</span></button>' : ''}
       <button class="btn sm ghost" data-act="fullscreen" title="Fullscreen" aria-label="Fullscreen">⛶</button>
       <button class="btn sm ghost" data-act="menu" title="Main menu" aria-label="Main menu">⏏</button>
     </div></header>
@@ -83,6 +84,7 @@ on({
   menu: async () => { if (app.state?.weekend?.race && !app.state.weekend.race.finished) { app.pauseRace?.(); } persist(); app.state = null; go('menu'); },
 });
 
+const viewKey = () => [app.route, app.arg, app.state?.weekend?.phase, !!app.state?.weekend?.live, app.state?.round, app.state?.weekend?.practice?.done, app.state?.weekend?.quali?.session].join('|');
 export function render() {
   const root = document.getElementById('app');
   const def = screens[app.route] || screens.menu;
@@ -91,13 +93,51 @@ export function render() {
   app._lastRoute = app.route;
   try {
     const inner = def.render(app.arg);
-    root.innerHTML = def.bare ? inner : shell(inner);
+    const html = def.bare ? inner : shell(inner);
+    const same = app._lastKey === viewKey() && root.firstChild;
+    const sx = window.scrollX, sy = window.scrollY;
+    if (same) morphHtml(root, html); else root.innerHTML = html;
+    app._sameRender = !!same;
+    if (same) window.scrollTo?.(sx, sy);
     def.after?.(root, app.arg);
   } catch (e) {
     console.error(e);
     root.innerHTML = `<div class="menu-hero"><div class="card" style="max-width:560px"><h2>Something went wrong</h2><p class="muted">The screen failed to render. Your autosave is intact.</p><pre class="small" style="white-space:pre-wrap">${esc(e.stack || e.message)}</pre><div class="row"><button class="btn primary" data-act="recover">Return to HQ</button><button class="btn" data-act="menu">Main menu</button></div></div></div>`;
   }
-  if (!def.keepScroll) window.scrollTo?.(0, 0);
+  const key = viewKey();
+  if (!def.keepScroll && app._lastKey !== key) window.scrollTo?.(0, 0);
+  app._lastKey = key;
+}
+// In-place DOM update: only changed nodes/attributes are touched, so clicking an option never
+// flashes the page or jumps back to the top (scroll positions of inner panels are kept too).
+function morphHtml(root, html) {
+  const tpl = document.createElement('div'); tpl.innerHTML = html;
+  morphChildren(root, tpl);
+}
+function morphChildren(a, b) {
+  const an = [...a.childNodes], bn = [...b.childNodes];
+  for (let i = 0; i < bn.length; i++) {
+    const x = an[i], y = bn[i];
+    if (!x) { a.appendChild(y); continue; }
+    if (x.nodeType !== y.nodeType || x.nodeName !== y.nodeName || (x.id || '') !== (y.id || '')) { a.replaceChild(y, x); continue; }
+    if (x.nodeType === 3 || x.nodeType === 8) { if (x.nodeValue !== y.nodeValue) x.nodeValue = y.nodeValue; continue; }
+    morphNode(x, y);
+  }
+  for (let i = an.length - 1; i >= bn.length; i--) an[i].remove();
+}
+function morphNode(x, y) {
+  x._html = x._h = x._k = undefined;
+  for (const at of [...x.attributes]) if (!y.hasAttribute(at.name)) x.removeAttribute(at.name);
+  for (const at of [...y.attributes]) if (x.getAttribute(at.name) !== at.value) x.setAttribute(at.name, at.value);
+  if (x.tagName === 'INPUT' || x.tagName === 'SELECT' || x.tagName === 'TEXTAREA') {
+    if (x.type === 'checkbox' || x.type === 'radio') x.checked = y.hasAttribute('checked');
+    else if (x.tagName === 'SELECT') { morphChildren(x, y); const o = [...y.options].findIndex((o) => o.hasAttribute('selected')); if (o >= 0) x.selectedIndex = o; return; }
+    else if (document.activeElement !== x) x.value = y.getAttribute('value') ?? y.value ?? '';
+    if (x.tagName !== 'TEXTAREA') return;
+  }
+  if (x.tagName === 'DETAILS') x.open = y.hasAttribute('open') || x.open;
+  // live widgets (canvas/svg groups filled by scripts) are replaced wholesale by their after() hooks
+  morphChildren(x, y);
 }
 on({ recover: () => go(app.state?.mode === 'quick' ? 'weekend' : 'hq') });
 function route() {

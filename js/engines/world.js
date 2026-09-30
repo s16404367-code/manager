@@ -1,3 +1,4 @@
+import { ensureSchedule } from './calendarEngine.js';
 // World creation & organisation selectors (pure).
 import { RNG } from '../sim/rng.js';
 import { clamp, avg } from '../sim/util.js';
@@ -130,6 +131,7 @@ export function createWorld(opts) {
     state.inbox.push({ sev: 'info', text: `Welcome, Team Principal. The board expects P${state.board.target} or better in the Constructors' Championship.`, round: 0 });
   }
   state.rngS = rng.s;
+  if (state.mode === 'career') { state.week = 1; ensureSchedule(state); }
   return state;
 }
 // Real 2026 calendar order; shorter seasons take an evenly spaced subset (keeps the season's geography).

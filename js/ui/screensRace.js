@@ -23,7 +23,7 @@ screen('race', {
     const t = trackById(wk.trackId);
     return `<div class="racebar" id="racebar"></div>
     <div class="mtabs"><button class="btn sm on" data-act="mtab" data-arg="ctrl">Pit wall</button><button class="btn sm" data-act="mtab" data-arg="tower">Timing</button><button class="btn sm" data-act="mtab" data-arg="feed">Radio</button></div>
-    <div class="race" id="racegrid" data-mt="ctrl">
+    <div class="live rgrid" id="racegrid" data-mt="ctrl">
       <div class="card c-tower tower"><div class="row"><h4 style="margin:0">Timing</h4><span class="sp"></span><button class="btn sm ghost" data-act="gapMode" id="gapModeBtn">Interval</button></div><div id="tower"></div></div>
       <div class="c-map"><div class="mapwrap">${mapSvg(t, 'map')}${sectorLegend()}</div>
         <div class="card tight" style="margin-top:.8rem"><h4 style="margin:0 0 .4rem">Telemetry <span class="tiny muted" style="text-transform:none;letter-spacing:0">— tap any car in the timing table (yours or a rival)</span></h4>${teleHtml(t, 'rtele')}</div>
@@ -91,6 +91,7 @@ function recommendation(race, p) {
   if (p.type === 'sc' || p.type === 'vsc') for (const c of mine) { const left = race.laps - c.lapsDone; const next = c.plan.stops[c.planIdx]; if (left > 4 && (c.tyre.wear > 35 || (next && next.lap - c.lapsDone < 10))) recs.push(`Box ${c.short} for ${left > 15 / race.scale ? 'Hards' : 'Mediums'}`); else recs.push(`Keep ${c.short} out (track position)`); }
   if (p.type === 'rain') recs.push(race.wetness > 0.2 ? 'Switch to Intermediates now' : 'Wait one more lap — crossover is close');
   if (p.type === 'dry') recs.push(race.wetness < 0.1 ? 'Switch to slicks now' : 'Hold on inters one more lap');
+  if (p.type === 'pitplan') { const c = carById(race, p.carId); if (c) recs.push(grip(c.tyre) > 45 ? 'Tyres still have life — extending 2 laps is an option' : grip(c.tyre) < 25 ? 'Box now: grip is nearly gone' : 'Stick to the plan'); }
   if (p.type === 'red') recs.push('Free tyre change: fit the tyre that can reach the flag (Hards if >25 laps left)');
   if (p.type === 'cliff') recs.push('Box within 1–2 laps or lose ~1s+/lap');
   if (p.type === 'damage') recs.push('Repair if more than ~8 laps remain');
@@ -110,7 +111,7 @@ export function raceDataHtml(race) {
 }
 function showDecision(race, p) {
   const mine = race.cars.filter((c) => c.isPlayer && !c.dnf && !c.finished);
-  const titles = { red: '🟥 Red flag', vsc: '🟡 Virtual Safety Car', sc: '🟡 Safety Car', rain: '🌧️ Rain', dry: '☀️ Track drying', cliff: '⚠️ Tyre cliff', failure: '🔧 Technical problem', damage: '💥 Damage', orders: '📻 Team orders', plan: '📋 Strategy check', fuel: '⛽ Fuel' };
+  const titles = { pitplan: '🛞 Planned pit stop', red: '🟥 Red flag', vsc: '🟡 Virtual Safety Car', sc: '🟡 Safety Car', rain: '🌧️ Rain', dry: '☀️ Track drying', cliff: '⚠️ Tyre cliff', failure: '🔧 Technical problem', damage: '💥 Damage', orders: '📻 Team orders', plan: '📋 Strategy check', fuel: '⛽ Fuel' };
   const car = p.carId ? carById(race, p.carId) : null;
   let body = '';
   if (['sc', 'vsc', 'red', 'rain', 'dry'].includes(p.type)) body = mine.map((c) => tyreRow(race, c)).join('');
@@ -121,6 +122,9 @@ function showDecision(race, p) {
   if (p.type === 'plan') body = mine.map((c) => { const rest = c.plan.stops.slice(c.planIdx); const k = race.degMult || 1; const adj = rest.map((st) => Math.max(c.lapsDone + 1, Math.min(race.laps - 1, Math.round(c.lapsDone + (st.lap - c.lapsDone) / k)))); return `<div class="carpanel"><div class="hd"><span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b><span class="pill">P${c.pos}</span>${tyreBadge(c.tyre.c)}<span class="tiny muted">grip ${grip(c.tyre)}% after ${c.tyre.age} laps</span></div>
     <div class="small">Current plan: ${rest.length ? rest.map((st) => `L${st.lap} → ${tyreBadge(st.c)}`).join(' ') : 'no more stops'}${rest.length ? ` · <span class="muted">adjusted for today's wear: ${adj.map((l, i) => `L${l} → ${rest[i].c}`).join(', ')}</span>` : ''}</div>
     <div class="row" style="margin-top:.4rem"><button class="btn sm on" data-act="dplan" data-arg="${c.id}:keep">Continue with plan</button><button class="btn sm" data-act="dplan" data-arg="${c.id}:replan">Engineers adapt to today's wear</button><button class="btn sm" data-act="dplan" data-arg="${c.id}:manual">I'll call stops manually</button></div></div>`; }).join('');
+  if (p.type === 'pitplan' && car) { const st = car.plan.stops[car.planIdx]; body = `<div class="carpanel"><div class="small">Grip ${grip(car.tyre)}% after ${car.tyre.age} laps · P${car.pos} · plan: box L${st?.lap} → ${st ? tyreBadge(st.c) : ''}</div>
+    <div class="tiny muted" style="margin-top:.4rem">Keep the plan, but choose the tyre:</div><div class="row">${['S', 'M', 'H', 'I', 'W'].map((x) => `<button class="btn sm ${st?.c === x ? 'on' : ''}" data-act="dstop" data-arg="${car.id}:${x}">Box → ${tyreBadge(x)}</button>`).join('')}</div>
+    <div class="row" style="margin-top:.4rem"><button class="btn sm" data-act="ddelay" data-arg="${car.id}:2">Stay out +2 laps</button><button class="btn sm" data-act="ddelay" data-arg="${car.id}:5">Stay out +5 laps</button><button class="btn sm" data-act="dplan" data-arg="${car.id}:manual">Cancel plan — I'll call it</button></div></div>`; }
   if (p.type === 'orders') body = `<div class="opts"><button class="btn" data-act="dorders" data-arg="${p.carId}:${p.mateId}:swap"><b>Swap positions</b>&nbsp;<span class="muted small">Faster car through; morale hit for the other driver.</span></button><button class="btn" data-act="dorders" data-arg="${p.carId}:${p.mateId}:hold"><b>Hold positions</b>&nbsp;<span class="muted small">No risk of contact; frustrated faster driver.</span></button><button class="btn" data-act="dorders" data-arg="${p.carId}:${p.mateId}:race"><b>Let them race</b>&nbsp;<span class="muted small">Fair, but risk of contact and time loss.</span></button></div>`;
   modal(`<div class="decision" style="padding:.2rem;border:0"><h2>${titles[p.type] || 'Decision'} <span class="muted small">Lap ${race.lap}/${race.laps}</span></h2><p>${esc(p.text)}</p>${recommendation(race, p)}${body}<details class="rdata"><summary>📊 Full race data (all cars, weather)</summary>${raceDataHtml(race)}</details><div class="row" style="justify-content:flex-end;margin-top:1rem"><button class="btn" data-act="dpeek">👁 View race screen (stays paused)</button><button class="btn primary" data-act="dclose">Resume race ▶</button></div></div>`, { wide: true, dismiss: false });
 }
@@ -130,6 +134,8 @@ on({
   dmode: (arg, el) => { const [id, m] = arg.split(':'); actions.mode(R(), id, m); el.classList.add('on'); },
   dorders: (arg) => { const [a, b, k] = arg.split(':'); actions.orders(R(), a, b, k); closeModal(); },
   dplan: (arg, el) => { const [id, k] = arg.split(':'); const r = R(); if (k === 'replan') actions.replan(r, id); else actions.auto(r, id, k === 'keep'); el.parentElement.querySelectorAll('.btn').forEach((b) => b.classList.toggle('on', b === el)); toast(k === 'keep' ? 'Plan kept.' : k === 'replan' ? 'Plan adapted to race-day wear.' : 'Manual pit calls — use the pit buttons.', 'info', 1800); },
+  dstop: (arg, el) => { const [id, x] = arg.split(':'); actions.changeStop(R(), id, x); el.parentElement.querySelectorAll('.btn').forEach((b) => b.classList.toggle('on', b === el)); },
+  ddelay: (arg, el) => { const [id, n] = arg.split(':'); actions.delayStop(R(), id, +n); el.classList.add('on'); },
   dclose: () => { document.getElementById('peekbar')?.remove(); closeModal(); },
 });
 

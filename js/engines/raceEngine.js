@@ -325,6 +325,10 @@ function onLeaderLap(race, leader, t, rng) {
       c._windowWarn = { ...(c._windowWarn || {}), [c.planIdx]: true };
       pushLog(race, race.lap, `${c.short}: pit window opens in 2 laps (plan: ${COMPOUNDS[nextStop.c].name}).`, 'info', c.id);
     }
+    if (nextStop && nextStop.lap - race.lap === 1 && c.autoPlan && !c._pitAsk?.[c.planIdx]) {
+      c._pitAsk = { ...(c._pitAsk || {}), [c.planIdx]: true };
+      raise(race, { type: 'pitplan', carId: c.id, text: `${c.short}: planned stop at the end of lap ${nextStop.lap} for ${COMPOUNDS[nextStop.c].name}s. Tyre grip now ${Math.round(100 - c.tyre.wear)}% (100% = new, 0% = no grip — lap time rises as grip drops). Continue with the plan or change it?` });
+    }
   }
 }
 
@@ -433,6 +437,8 @@ function finishRace(race) {
 // Player actions ------------------------------------------------------------
 export const actions = {
   pit(race, carId, compound, opts = {}) { const c = carById(race, carId); if (!c || c.dnf || c.finished) return; c.pitReq = { c: compound, ...opts }; radio(race, c, `Copy, box this lap for ${COMPOUNDS[compound].name}s.`); },
+  delayStop(race, carId, n) { const c = carById(race, carId); const st = c?.plan.stops[c.planIdx]; if (st) { st.lap = Math.min(race.laps - 1, st.lap + n); radio(race, c, `Copy, extending the stint — box on lap ${st.lap}.`); } },
+  changeStop(race, carId, comp) { const c = carById(race, carId); const st = c?.plan.stops[c.planIdx]; if (st) st.c = comp; },
   cancelPit(race, carId) { const c = carById(race, carId); if (c) { c.pitReq = null; } },
   mode(race, carId, m) { const c = carById(race, carId); if (c && MODE[m]) c.mode = m; },
   ers(race, carId, m) { const c = carById(race, carId); if (c && ERS[m]) c.ers = m; },

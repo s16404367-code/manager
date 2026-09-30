@@ -8,6 +8,8 @@ import { PERSONALITIES } from '../data/drivers.js';
 import { startWeekend, runPractice, runQualiSession, engineerEstimate, estimateReliability, PRACTICE_PROGRAMS, strategyContext, defaultPlans, buildRace } from '../engines/weekendEngine.js';
 import { effectiveCar, trackScore, SETUP_KEYS, SETUP_LABEL, SETUP_HINT, SETUP_GROUPS, setupQuality, setupCharacter, driverStyle } from '../engines/carModel.js';
 import { setupChanged } from '../engines/sessionEngine.js';
+import { clockCard } from './calendarUi.js';
+import { raceDue } from '../engines/calendarEngine.js';
 import { liveView, startLive, stopLive } from './screenSession.js';
 import { planOptions, labelPlans, clonePlan } from '../engines/strategyEngine.js';
 import { COMPOUNDS, estimateStint, grip } from '../engines/tyreEngine.js';
@@ -64,7 +66,14 @@ function practiceAnalysis(s, wk, withApply = false) {
       return `<tr><td>${tyreBadge(c)}</td><td>${rs.length}</td><td class="mono">${fmtTime(best)}</td><td class="mono">${fmtTime(avg)}</td><td class="mono">${deg == null ? '—' : (deg >= 0 ? '+' : '') + deg.toFixed(2) + 's'}</td><td class="tiny">${bestRun.s} run ${bestRun.run} · ${bestRun.prog} · ${bestRun.fuel} fuel · ${bestRun.temp}°C${bestRun.wet > 0.05 ? ' · ' + Math.round(bestRun.wet * 100) + '% wet' : ''}</td></tr>`;
     }).join('');
     const runs = log.map((r, i) => ({ r, i })).filter(({ r }) => !r.del).sort((a, b) => a.r.time - b.r.time).slice(0, 6);
-    return `<div class="card tight"><b>${esc(s.drivers[did].name)}</b> <span class="tiny muted">${log.length} timed laps</span>
+    // Best setup: fastest lap after correcting for fuel load, tyre compound and grip left (fair comparison between runs)
+    const FUEL = { low: 0, medium: 0.6, high: 1.3 }; const CMP = { S: 0, M: 0.35, H: 0.7, I: 0, W: 0 };
+    const norm = (r) => r.time - (FUEL[r.fuel] || 0) - (CMP[r.c] || 0) - (100 - (r.grip ?? 100)) * 0.012;
+    const bestSet = log.map((r, i) => ({ r, i, n: norm(r) })).filter(({ r }) => !r.del && r.setup && r.wet < 0.15).sort((a, b) => a.n - b.n)[0];
+    const bestBox = withApply && bestSet ? `<div class="alert good small" style="margin:.5rem 0"><b>🏆 Best setup found in practice</b> — ${bestSet.r.s} run ${bestSet.r.run} on ${tyreBadge(bestSet.r.c)}: ${fmtTime(bestSet.r.time)} (≈${fmtTime(bestSet.n)} fuel/tyre-corrected)
+      <div class="tiny" style="margin:.3rem 0">${Object.entries(bestSet.r.setup).map(([k, v]) => `${SETUP_LABEL[k] || k} <b>${v}</b>`).join(' · ')}</div>
+      <button class="btn sm primary" data-act="applyRunSetup" data-arg="${did}:${bestSet.i}" ${wk.parcFerme ? 'disabled' : ''}>Apply best setup</button> <span class="tiny muted">Engineer estimate reliability: ${estimateReliability(wk, did).label}</span></div>` : '';
+    return `<div class="card tight"><b>${esc(s.drivers[did].name)}</b> <span class="tiny muted">${log.length} timed laps</span>${bestBox}
     <div class="tw"><table class="tbl small"><thead><tr><th>Tyre</th><th>Laps</th><th>Best</th><th>Average</th><th>Deg/lap</th><th>Best lap context</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="tiny muted" style="margin-top:.4rem">Fastest laps (setup, tyre, conditions)</div>
     <div class="tw"><table class="tbl small"><thead><tr><th>Session</th><th>Tyre</th><th>Grip</th><th>Time</th><th>Track</th><th>Wind</th><th>Fuel</th><th>Notes</th>${withApply ? '<th></th>' : ''}</tr></thead><tbody>${runs.map(({ r, i }) => `<tr><td>${r.s} R${r.run}</td><td>${tyreBadge(r.c)}</td><td>${r.grip}%</td><td class="mono">${fmtTime(r.time)}</td><td>${r.temp}°${r.wet > 0.05 ? ' 💧' + Math.round(r.wet * 100) + '%' : ''}</td><td>${r.wind ?? '—'}</td><td>${r.fuel}</td><td class="tiny">${(r.notes || []).join(', ')}</td>${withApply ? `<td><button class="btn sm" data-act="applyRunSetup" data-arg="${did}:${i}" ${wk.parcFerme ? 'disabled' : ''} title="${esc(Object.entries(r.setup || {}).map(([k, v]) => k + ' ' + v).join(', '))}">Apply setup</button></td>` : ''}</tr>`).join('')}</tbody></table></div></div>`;
@@ -108,6 +117,7 @@ screen('weekend', {
       if (s.phase === 'review') return `<div class="empty">Season complete. <a href="#/review">Open the season review →</a></div>`;
       if (s.pendingEvent) return `<div class="card"><h2>Decision required before the weekend</h2><p class="muted">Resolve the pending matter in HQ first.</p><button class="btn primary" data-act="go" data-arg="hq">Go to HQ</button></div>`;
       const t = trackById(s.calendar[s.round]);
+      if (s.mode === 'career' && (s.round >= s.calendar.length || !raceDue(s))) return `<div class="pagehead"><h1>${s.round >= s.calendar.length ? 'Off-season' : 'Next: ' + esc(t.name)}</h1></div>${clockCard(s)}`;
       return `<div class="pagehead"><h1>Next: ${esc(t.name)}</h1></div><div class="card"><p>Round ${s.round + 1} of ${s.calendar.length}. ${esc(t.archetype)}.</p><button class="btn primary" data-act="beginWeekend">Travel to ${esc(t.name)} →</button></div>`;
     }
     const wk = s.weekend; if (!wk) return '<div class="empty">No weekend active.</div>';
@@ -160,7 +170,9 @@ function practiceView(s, wk, t) {
 }
 on({
   prog: (arg) => { const [did, k] = arg.split(':'); app.tab.prog[did] = k; render(); },
-  runPractice: () => { const wk = WK(); const progs = {}; for (const did of S().teams[S().player].drivers) progs[did] = app.tab.prog?.[did] || 'setup'; runPractice(S(), progs); persist(); render(); toast('Session complete — engineering report updated.'); },
+  runPractice: () => { // quick-simulate through the real session engine so lap data (runLog) is recorded for the analysis & quali screens
+    const sess = createSession(S(), 'practice'); for (const c of sess.cars) if (c.isPlayer) c.prog = app.tab.prog?.[c.did] || 'setup';
+    commitSession(S()); persist(); render(); toast('Session complete — engineering report and lap data updated.'); },
   toQuali: () => { if (WK().live) commitSession(S()); WK().phase = 'quali'; persist(); render(); },
   liveFP: () => { const sess = createSession(S(), 'practice'); for (const c of sess.cars) if (c.isPlayer) c.prog = app.tab.prog?.[c.did] || 'setup'; persist(); render(); },
   liveQ: () => { createSession(S(), 'quali'); persist(); render(); },

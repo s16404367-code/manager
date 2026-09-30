@@ -9,6 +9,8 @@ import * as C from '../engines/careerEngine.js';
 import { deptQ, driverRating, driverSalary, DIFFICULTY, facLvl } from '../engines/world.js';
 import { effectiveCar } from '../engines/carModel.js';
 import { money, avg, clamp, qual } from '../sim/util.js';
+import { lastYearAdvice } from './screensMisc.js';
+import { clockCard, yearPlanList, yearStrip } from './calendarUi.js';
 import { bar, helpBtn, pill, lineChart, barChart, tabs, sevColor } from './widgets.js';
 
 const S = () => app.state; const P = () => app.state.teams[app.state.player];
@@ -53,9 +55,9 @@ screen('hq', {
     const attn = attentionList(s);
     return `<div class="pagehead"><h1>Team HQ</h1><span class="pill">${esc(PROFILES[t.profile]?.label || '')}</span><span class="pill">${esc(PHILOSOPHIES[t.philosophy]?.label || '')}</span></div>
     ${app.tutorial ? tutorialCard() : ''}
+    ${s.season > 1 && s.schedule && s.week < s.schedule.first ? `<div style="margin-bottom:1rem">${lastYearAdvice(s)}</div>` : ''}
     <div class="grid g3">
-      <div class="card"><h4>Next race</h4><h2 style="margin:.2rem 0">${esc(tr.name)}</h2><div class="small muted">${esc(tr.archetype)} · Round ${s.round + 1}/${s.calendar.length}</div>
-        <div class="row" style="margin-top:.7rem"><button class="btn primary" data-act="go" data-arg="weekend" ${s.pendingEvent ? 'disabled title="Resolve the pending decision first"' : ''}>${s.weekend ? 'Resume weekend' : 'Go to race weekend'} →</button></div></div>
+      ${clockCard(s)}
       <div class="card"><h4>Championship</h4><div class="row"><div class="stat"><b>P${pos}</b><span>Constructors</span></div><div class="stat"><b>${t.points}</b><span>Points</span></div><div class="stat"><b>P${s.board.target}</b><span>Target</span></div></div>
         <div class="small" style="margin-top:.5rem">${t.drivers.map((id) => `${esc(s.drivers[id].name)}: P${st.drivers.findIndex((d) => d.id === id) + 1} (${s.drivers[id].seasonPts || 0} pts)`).join('<br>')}</div></div>
       <div class="card"><h4>At risk</h4><div class="small">Board confidence ${bar(s.board.confidence, 100, sevColor(s.board.confidence, 55, 30))}Cost cap used ${bar(t.budgetSpent, COST_CAP, t.budgetSpent > COST_CAP * 0.9 ? 'var(--bad)' : null)}Team morale ${bar(avg(Object.values(t.depts).map((d) => d.morale)), 100, sevColor(avg(Object.values(t.depts).map((d) => d.morale))))}Staff fatigue ${bar(avg(Object.values(t.depts).map((d) => d.fatigue)), 100, 'var(--warn)')}</div></div>
@@ -63,7 +65,7 @@ screen('hq', {
     <div class="grid g2" style="margin-top:1rem">
       <div class="col">${eventCard(s)}<div class="card"><h3>Needs attention</h3>${attn.length ? attn.map(([k, txt, r]) => `<div class="alert ${k}"><a href="#/${r}" style="color:inherit;text-decoration:none">${esc(txt)} →</a></div>`).join('') : '<div class="muted small">Nothing urgent. Consider long-term investments.</div>'}</div>
         <div class="card"><h3>Car vs field ${helpBtn('car')}</h3>${CAR_ATTRS.map((k) => { const mine = t.car[k]; const fa = avg(field.map((x) => x.car[k])); const d = mine - fa; return `<div class="row small" style="margin:.15rem 0"><span style="width:140px">${ATTR_LABEL[k]}</span><div style="flex:1">${bar(mine, 110, d > 1 ? 'var(--good)' : d < -1 ? 'var(--bad)' : null)}</div><span class="mono" style="width:48px;text-align:right" class="${d >= 0 ? 'good' : 'bad'}">${d >= 0 ? '+' : ''}${d.toFixed(1)}</span></div>`; }).join('')}<div class="tiny muted">Difference vs AI field average (estimate).</div></div></div>
-      <div class="col"><div class="card"><h3>Inbox</h3>${s.inbox.slice(0, 10).map((m) => `<div class="alert ${m.sev === 'info' ? '' : m.sev} small">${m.season ? `<span class="muted tiny">S${m.season} R${m.round + 1}</span> ` : ''}${esc(m.text)}</div>`).join('') || '<div class="muted">Empty</div>'}</div>
+      <div class="col"><div class="card"><h3>Year plan ${s.year}</h3>${yearStrip(s)}${yearPlanList(s)}</div><div class="card"><h3>Inbox</h3>${s.inbox.slice(0, 10).map((m) => `<div class="alert ${m.sev === 'info' ? '' : m.sev} small">${m.season ? `<span class="muted tiny">S${m.season} R${m.round + 1}</span> ` : ''}${esc(m.text)}</div>`).join('') || '<div class="muted">Empty</div>'}</div>
         <div class="card"><h3>Paddock news</h3>${s.news.slice(0, 8).map((n) => `<div class="small" style="margin:.25rem 0">• ${esc(n.text)} <span class="muted tiny">(unconfirmed)</span></div>`).join('') || '<div class="muted small">Quiet in the paddock.</div>'}</div></div>
     </div>`;
   },
@@ -101,11 +103,11 @@ function devTab(s, t) {
     <label style="margin-top:.6rem">Part allocation</label><div class="seg"><button class="btn sm ${qty === 2 ? 'on' : ''}" data-act="selQty" data-arg="2">Both cars</button><button class="btn sm ${qty === 1 ? 'on' : ''}" data-act="selQty" data-arg="1">One car first (cheaper, faster to race)</button></div>
     <h4 style="margin-top:.8rem">Expected effect (range)</h4>${fx}
     <dl class="kv" style="margin-top:.6rem"><dt>Design cost</dt><dd>${money(pv.cost)}</dd><dt>Manufacturing</dt><dd>${money(pv.mfgCost)} (${pv.qty} set${pv.qty > 1 ? 's' : ''})</dd><dt>Design time</dt><dd>~${pv.weeks} weeks (+${pv.mfgWeeks} manufacturing)</dd><dt>Failure risk</dt><dd class="${pv.failP > 0.15 ? 'bad' : pv.failP > 0.07 ? 'warn' : ''}">${info >= 0.8 ? Math.round(pv.failP * 100) + '%' : pv.failP > 0.15 ? 'High' : pv.failP > 0.07 ? 'Moderate' : 'Low'}</dd><dt>Correlation confidence</dt><dd>${qual(pv.corr * 100)} ${pv.tpl.aero ? `<span class="muted tiny">(ATR ×${pv.atr.toFixed(2)})</span>` : ''}</dd><dt>Lead</dt><dd>${esc(t.depts[pv.tpl.dept].head.name)} (${t.depts[pv.tpl.dept].head.spec}, fatigue ${Math.round(t.depts[pv.tpl.dept].fatigue)})</dd></dl>
-    <div class="row" style="margin-top:.8rem"><button class="btn primary" data-act="startPrj" ${active >= maxActive ? 'disabled' : ''}>Start project (${money(pv.cost)})</button><label class="small" style="margin:0"><input type="checkbox" ${t.crunch ? 'checked' : ''} data-change="crunch"> Crunch mode (+25% speed, fatigue & failure risk)</label></div></div></div>`;
+    <div class="row" style="margin-top:.8rem"><button class="btn primary" data-act="startPrj" ${active >= maxActive ? 'disabled' : ''}>Start project (${money(pv.cost)})</button><label class="small" style="margin:0"><input type="checkbox" ${t.crunch ? 'checked' : ''} data-change="crunch"> Crunch mode (≈30% faster, costs $0.3M/week, more fatigue & failure risk)</label></div></div></div>`;
 }
 on({
   selPrj: (id) => { app.tab.prj = id; render(); }, selAppr: (k) => { app.tab.appr = k; render(); }, selQty: (q) => { app.tab.qty = +q; render(); },
-  startPrj: () => { const r = C.startProject(S(), app.tab.prj || PROJECTS[0].id, app.tab.appr || 'standard', app.tab.qty || 2); if (!r.ok) return toast(r.msg, 'warn'); persist(); toast(`${r.project.name} started.`, 'good'); app.tab.car = 'pipe'; render(); },
+  startPrj: () => { if (S().schedule && S().week < S().schedule.devOpen) return toast(`Development opens in week ${S().schedule.devOpen}.`, 'warn'); const r = C.startProject(S(), app.tab.prj || PROJECTS[0].id, app.tab.appr || 'standard', app.tab.qty || 2); if (!r.ok) return toast(r.msg, 'warn'); persist(); toast(`${r.project.name} started.`, 'good'); app.tab.car = 'pipe'; render(); },
   crunch: (a, el) => { P().crunch = el.checked; persist(); render(); },
 });
 const fxText = (fx) => Object.entries(fx || {}).filter(([, v]) => Math.abs(v) > 0.05).map(([k, v]) => `${ATTR_LABEL[k]} ${v >= 0 ? '+' : ''}${v.toFixed(1)}`).join(', ');
@@ -175,7 +177,7 @@ function deptsTab(s, t) {
   ${Object.entries(t.depts).map(([k, d]) => `<tr><td><b>${DEPARTMENTS[k].label}</b><div class="tiny muted">${DEPARTMENTS[k].affects}</div></td><td>${esc(d.head.name)}<div class="tiny muted" title="${esc(SPEC_DESC[d.head.spec])}">${d.head.spec} · age ${d.head.age} · loyalty ${d.head.loyalty}</div></td><td>${d.head.skill}</td><td>${Math.round(deptQ(t, k))}</td><td style="color:${sevColor(d.morale)}">${Math.round(d.morale)}</td><td style="color:${d.fatigue > 60 ? 'var(--bad)' : d.fatigue > 35 ? 'var(--warn)' : ''}">${Math.round(d.fatigue)}</td><td>${Math.round(d.workload)}%</td>
   <td><div class="row" style="flex-wrap:nowrap;gap:.2rem"><button class="btn sm" data-act="hc" data-arg="${k}:-1" aria-label="Reduce headcount">−</button><b>${d.headcount}</b><button class="btn sm" data-act="hc" data-arg="${k}:1" aria-label="Increase headcount">+</button></div></td><td class="small">${money(d.head.salary)}</td>
   <td><div class="row" style="flex-wrap:nowrap;gap:.2rem"><button class="btn sm" data-act="raise" data-arg="${k}" title="+15% salary, morale & loyalty">Raise</button><button class="btn sm" data-act="rest" data-arg="${k}" title="-25 fatigue, projects +1 week">Break</button></div></td></tr>`).join('')}</tbody></table></div>
-  <p class="small muted">Each headcount step costs ~$0.45M/season. Fatigue comes from workload and crunch; it causes failed prototypes, slow stops and defects.</p>`;
+  <p class="small muted">Each headcount step costs ~$0.45M/season. Every department settles at a baseline fatigue of 20 when idle. Working on projects raises it according to the size of the work (both-car sets, aggressive concepts, long projects) and crunch; high fatigue causes failed prototypes, slow stops and defects.</p>`;
 }
 on({
   hc: (arg) => { const [k, d] = arg.split(':'); C.changeHeadcount(S(), k, +d); persist(); render(); },

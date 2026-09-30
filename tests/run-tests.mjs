@@ -79,12 +79,16 @@ for (let season = 1; season <= 3; season++) {
     C.startProject(career, tpl, 'standard', 2);
     for (const p of career.projects.filter((p) => p.stage === 'ready')) C.deployProject(career, p.id);
     if (career.pendingEvent) C.resolveEvent(career, 0);
+    for (let g = 0; g < 30 && C.advanceToRace(career) === 'event'; g++) C.resolveEvent(career, 0);
+    ok(career.week === career.schedule.weeks[r], `race ${r} held in its scheduled week`);
     runRace(career, true);
     C.applyRaceResult(career);
     const errs = validate(career);
     ok(!errs.length, `valid after S${season}R${r}: ${errs.join(',')}`);
   }
   if (career.gameOver) { ok(true, 'game over state reachable'); break; }
+  ok(career.phase !== 'review', 'off-season before the year closes');
+  C.closeYear(career);
   ok(career.phase === 'review', 'season ends in review phase');
   for (const t of C.standings(career).teams) (aiPosHist[t.id] ||= []).push(t.pts);
   C.startNextSeason(career);

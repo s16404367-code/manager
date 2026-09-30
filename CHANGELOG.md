@@ -1,5 +1,21 @@
 # Changelog
 
+## v3.7
+- Fixed: "No timed laps yet" before Q1 in championship — quick-simulated practice now runs the real session engine, so all laps are logged.
+- No more page reload / jump to top when choosing an option anywhere: screens update in place (DOM morph) and keep scroll position.
+- Week-by-week year: fixed plan (year start week 1, development opens week 2, pre-season testing, race dates, year close week 52). Races are spread across the year according to the number of races (24 = March→December, fewer = shorter window). "Next week" / "Advance to race week" in HQ; events, offers and problems appear in any week; weekend opens only in race week; off-season after the last race, then "Close the year".
+- Crunch mode: costs $0.3M per week, ~30% faster progress while active, more fatigue. Staff fatigue: common baseline of 20 when idle; rises with the size of the work (both-car sets, aggressive, long projects).
+- Championship → Past seasons tab; planning screen and early-year HQ show last year's data with suggestions. Calendar tab shows race dates and the year plan. Results kept for 5 seasons.
+- Race history: season filter, totals (points, podiums, avg grid/finish, DNFs, places gained) and a detail view per race (full classification, pit stops, incidents, fastest lap, pole, conditions, SC/VSC, overtakes, race-control log).
+- Guide: new "📘 Guide" page explaining every left-menu page and every HQ section, plus a "📘 Guide" button in the top bar that explains the current page.
+
+## v3.6
+- Driver panels: text/buttons no longer overflow (practice, quali, race).
+- Before Q1: "Best setup found in practice" (fuel/tyre/grip-corrected fastest lap) with one-click apply.
+- Race screen uses the exact practice/quali grid (timing left, map + telemetry centre, driver panels + feed right).
+- New "Planned pit stop" decision one lap before each scheduled stop: box as planned (choose tyre), stay out +2/+5, or cancel the plan. Grip 100% = new tyre, 0% = no grip.
+- Debrief strategy chart redesigned (F1-TV style): rounded compound bars with stint length, pit laps under the bar, lap gridlines, legend.
+
 ## v3.5
 - Practice analysis per driver: best/average/deg per compound, fastest laps with setup, grip, track temp, wind, fuel.
 - Timing tower shows every car's tyre, laps on the set and grip %. Right-side panel shows position, last tyre, new/used set toggle and set inventory.

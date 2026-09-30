@@ -1,4 +1,5 @@
 // Main menu, new career (team creation), quick race setup, game over.
+import { buildSchedule, weekDate, fmtDate } from '../engines/calendarEngine.js';
 import { app, screen, on, go, esc, setState, persist, toast, render, modal, closeModal } from './app.js';
 import { createWorld, DIFFICULTY, driverSalary, driverRating } from '../engines/world.js';
 import { startWeekend } from '../engines/weekendEngine.js';
@@ -57,6 +58,7 @@ screen('newcareer', {
         <div class="grid g2" style="gap:.6rem">
           <div><label>Difficulty</label><select data-change="cdraft" data-arg="difficulty">${Object.entries(DIFFICULTY).map(([k, v]) => `<option value="${k}" ${d.difficulty === k ? 'selected' : ''}>${v.label}</option>`).join('')}</select><div class="tiny muted">${DIFFICULTY[d.difficulty].desc}</div></div>
           <div><label>Season length</label><select data-change="cdraft" data-arg="seasonLength">${[8, 12, 16, 24].map((n) => `<option value="${n}" ${d.seasonLength == n ? 'selected' : ''}>${n === 24 ? '24 races (full 2026 calendar)' : n + ' races'}</option>`).join('')}</select></div>
+          <div class="tiny muted" style="grid-column:1/-1">${(() => { const sc = buildSchedule(2027, d.seasonLength); const f = (w) => fmtDate(weekDate(2027, w)); return `📅 Year plan: starts ${f(1)} · development opens ${f(sc.devOpen)} · testing ${f(sc.testing)} · races ${f(sc.first)} → ${f(sc.last)} · year closes ${f(52)}`; })()}</div>
           <div><label>Venue order</label><select data-change="cdraft" data-arg="calendarOrder"><option value="real" ${d.calendarOrder !== 'random' ? 'selected' : ''}>Real 2026 order (climate follows the months)</option><option value="random" ${d.calendarOrder === 'random' ? 'selected' : ''}>Random order (reshuffled each season)</option></select></div>
           <div><label>Race distance</label><select data-change="cdraft" data-arg="raceLength">${[[0.25, '25% (~5 min)'], [0.35, '35% (~8 min)'], [0.5, '50% (~12 min)'], [1, '100% (full)']].map(([v, l]) => `<option value="${v}" ${d.raceLength == v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
           <div><label>Control level</label><select data-change="cdraft" data-arg="control"><option value="principal" ${d.control === 'principal' ? 'selected' : ''}>Principal (delegate details)</option><option value="hands-on" ${d.control === 'hands-on' ? 'selected' : ''}>Hands-on Principal</option></select></div>

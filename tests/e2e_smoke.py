@@ -6,7 +6,14 @@ OUT = sys.argv[2] if len(sys.argv) > 2 else '/tmp/shots'
 os.makedirs(OUT, exist_ok=True)
 errors = []
 def click(page, sel, **kw):
-    page.locator(sel).first.click(**kw); page.wait_for_timeout(150)
+    try: page.locator(sel).first.click(timeout=8000, **kw)
+    except Exception:
+        page.screenshot(path=f'{OUT}/FAIL.png'); raise
+    page.wait_for_timeout(150)
+def close_modals(page):
+    for _ in range(8):
+        if page.locator('[data-act=dclose]').count(): page.locator('[data-act=dclose]').first.click(); page.wait_for_timeout(150)
+        else: break
 def shot(page, name): page.screenshot(path=f'{OUT}/{name}.png', full_page=False)
 with sync_playwright() as p:
     b = p.chromium.launch()
@@ -43,12 +50,12 @@ with sync_playwright() as p:
         page.wait_for_timeout(3000)
         if page.locator('[data-act=dclose]').count(): shot(page, f'{tag}_07b_decision'); click(page, '[data-act=dclose]')
         shot(page, f'{tag}_08_race_fast')
-        click(page, '[data-tap=rpause]') if page.locator('[data-tap=rpause]').count() else None
+        close_modals(page); click(page, '[data-tap=rpause]') if page.locator('[data-tap=rpause]').count() else None; close_modals(page)
         for _ in range(4):
             if page.locator('[data-act=dclose]').count(): click(page, '[data-act=dclose]'); page.wait_for_timeout(200)
         if page.locator('[data-act=rskip]').count():
             click(page, '[data-act=rskip]'); click(page, '[data-act=modalOk]'); page.wait_for_timeout(500)
-        click(page, '[data-act=toDebrief]'); page.wait_for_timeout(300); shot(page, f'{tag}_09_post')
+        close_modals(page); click(page, '[data-act=toDebrief]'); page.wait_for_timeout(300); shot(page, f'{tag}_09_post')
         # Career
         page.goto(URL + '#/newcareer'); page.wait_for_timeout(300)
         # need state-less route: go via menu
@@ -60,12 +67,28 @@ with sync_playwright() as p:
         boxes.nth(0).check(); page.wait_for_timeout(150); page.locator('[data-change=cdriver]').nth(1).check(); page.wait_for_timeout(150)
         shot(page, f'{tag}_10_newcareer')
         click(page, '[data-act=startCareer]'); click(page, '[data-act=modalOk]'); page.wait_for_timeout(300); shot(page, f'{tag}_11_hq')
-        for r in ['car', 'staff', 'drivers', 'facilities', 'finance', 'sponsors', 'board', 'championship', 'regulations', 'history', 'achievements', 'help', 'settings', 'saves']:
+        for r in ['car', 'staff', 'drivers', 'facilities', 'finance', 'sponsors', 'board', 'championship', 'regulations', 'history', 'achievements', 'guide', 'help', 'settings', 'saves']:
             page.goto(URL + '#/' + r); page.wait_for_timeout(250)
             if page.locator('text=Something went wrong').count(): errors.append(f'{tag} screen {r} crashed')
             if tag == 'desk': shot(page, f'{tag}_s_{r}')
+        page.goto(URL + '#/hq'); page.wait_for_timeout(200)
+        for _ in range(2):
+            if page.locator('[data-act=resolveEv]').count(): click(page, '[data-act=resolveEv]')
+            if page.locator('[data-act=wkNext]:not([disabled])').count(): click(page, '[data-act=wkNext]')
+        click(page, '[data-act=guidePage]'); shot(page, f'{tag}_11b_guide'); click(page, '[data-act=modalClose]')
         page.goto(URL + '#/car'); page.wait_for_timeout(200); click(page, '[data-act=startPrj]')
-        if page.locator('[data-act=resolveEv]').count(): click(page, '[data-act=resolveEv]')
+        # scroll must survive an option click (in-place re-render)
+        click(page, '[data-arg="car:dev"]')
+        page.evaluate('window.scrollTo(0, 400)'); page.wait_for_timeout(100)
+        page.locator('[data-act=selAppr]').last.click(); page.wait_for_timeout(200)
+        if page.evaluate('window.scrollY') < 100 and tag == 'desk' and page.evaluate('document.body.scrollHeight') > 1400: errors.append(f'{tag} scroll jumped to top after option click')
+        page.goto(URL + '#/hq'); page.wait_for_timeout(200)
+        for _ in range(20):
+            if page.locator('[data-act=resolveEv]').count(): click(page, '[data-act=resolveEv]')
+            if page.locator('[data-act=wkRace]:not([disabled])').count(): click(page, '[data-act=wkRace]')
+            elif page.locator('[data-act=resolveEv]').count(): continue
+            else: break
+        shot(page, f'{tag}_11c_raceweek')
         page.goto(URL + '#/weekend'); page.wait_for_timeout(200)
         if page.locator('[data-act=beginWeekend]').count(): click(page, '[data-act=beginWeekend]')
         click(page, '[data-act=skipPractice]')
@@ -73,7 +96,7 @@ with sync_playwright() as p:
         click(page, '[data-act=toStrategy]'); click(page, '[data-act=startRace]'); page.wait_for_timeout(800)
         if page.locator('[data-act=dclose]').count(): click(page, '[data-act=dclose]')
         click(page, '[data-act=rskip]'); click(page, '[data-act=modalOk]'); page.wait_for_timeout(400)
-        click(page, '[data-act=toDebrief]'); click(page, '[data-act=postContinue]'); page.wait_for_timeout(300); shot(page, f'{tag}_12_hq_after')
+        close_modals(page); click(page, '[data-act=toDebrief]'); click(page, '[data-act=postContinue]'); page.wait_for_timeout(300); shot(page, f'{tag}_12_hq_after')
         # reload persistence
         page.reload(); page.wait_for_timeout(400); click(page, '[data-act=continue]'); page.wait_for_timeout(300); shot(page, f'{tag}_13_continued')
         ctx.close()

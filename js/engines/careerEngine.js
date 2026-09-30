@@ -6,11 +6,13 @@ import { CAR_ATTRS, ATTR_LABEL, PHILOSOPHIES, PROFILES } from '../data/teams.js'
 import { PROJECTS, APPROACHES, FACILITIES, SPONSOR_POOL, REGULATIONS, EVENTS, ATR_TABLE, COST_CAP, DEPARTMENTS, OBJ_TEXT } from '../data/content.js';
 import { DRIVERS } from '../data/drivers.js';
 import { trackById } from '../data/tracks.js';
+import { ensureSchedule, raceDue, YEAR_WEEKS, nextRaceWeek, weekLabel } from './calendarEngine.js';
 import { deptQ, facLvl, correlationQuality, genStaff, genStaffMarket, driverSalary, driverRating, DIFFICULTY, POINTS, pickCalendar, seasonObjectives } from './world.js';
 
 const rngOf = (state, salt) => { const r = new RNG((state.rngS ^ hashStr(String(salt))) >>> 0); return r; };
 const commit = (state, r) => { state.rngS = (state.rngS * 1664525 + 1013904223 + r.s) >>> 0; };
 export const pt = (s) => s.teams[s.player];
+export const FATIGUE_BASE = 20; // every department settles at this fatigue level when not developing
 export function note(state, sev, text) { state.inbox.unshift({ sev, text, round: state.round, season: state.season }); if (state.inbox.length > 80) state.inbox.pop(); }
 export function ledger(state, cat, amount, text, capped = true) {
   const t = pt(state); t.cash += amount;
@@ -32,7 +34,14 @@ export const teamPos = (state, tid) => standings(state).teams.findIndex((t) => t
 // ---------------- Race result application ----------------
 export function applyRaceResult(state) {
   const wk = state.weekend; const res = wk.result; const r = rngOf(state, 'res' + state.round + state.season);
-  state.results.push({ round: state.round, season: state.season, trackId: res.trackId, rows: res.rows.map((x) => ({ ...x, stints: x.stints.map((s) => s.c) })), wet: res.wet });
+  const rc = wk.race;
+  const fl = rc ? rc.cars.flatMap((c) => c.laps.slice(1).map((t) => ({ did: c.id, t }))).filter((x) => Number.isFinite(x.t)).sort((a, b) => a.t - b.t)[0] : null;
+  state.results.push({ round: state.round, season: state.season, year: state.year, week: state.week, trackId: res.trackId, wet: res.wet,
+    rows: res.rows.map((x) => { const c = rc?.cars.find((y) => y.id === x.did); return { ...x, stints: x.stints.map((s) => s.c), stops: c ? c.stops.map((st) => ({ lap: st.lap, to: st.to, total: st.total })) : [], laps: c?.lapsDone, inc: c ? c.incidents.map((i) => `L${i.lap} ${i.text}`) : [] }; }),
+    laps: rc?.laps, sc: rc?.sc?.count || 0, vsc: rc?.sc?.vscCount || 0, overtakes: rc?.stats?.overtakes || 0,
+    air: wk.weather?.airTemp, track: wk.weather?.trackTemp, maxWet: Math.round(Math.max(...(wk.weather?.wet || [0])) * 100),
+    pole: wk.grid?.[0], fastest: fl ? { did: fl.did, t: fl.t } : null,
+    log: (rc?.log || []).filter((l) => l.sev === 'bad' || l.sev === 'warn').slice(-25).map((l) => `L${l.lap}: ${l.text}`) });
   for (const row of res.rows) {
     const d = state.drivers[row.did]; const t = state.teams[row.teamId];
     d.seasonPts = (d.seasonPts || 0) + row.pts; t.points = (t.points || 0) + row.pts;
@@ -122,9 +131,32 @@ export function applyRaceResult(state) {
   commit(state, r);
   state.round++;
   state.weekend = null;
-  if (state.round >= state.calendar.length) { seasonEnd(state); }
-  else { betweenRaces(state); }
+  // the race week itself still counts as factory time; afterwards the player advances week by week
+  ensureSchedule(state);
+  weekTick(state); state.week = Math.min(YEAR_WEEKS, (state.week || 1) + 1);
+  if (state.round >= state.calendar.length) note(state, 'info', `Final race done. Off-season until the year closes (week ${YEAR_WEEKS}). Plan next year's car, staff and drivers.`);
 }
+// ---------------- Week-by-week calendar ----------------
+export function advanceWeek(state) {
+  ensureSchedule(state);
+  if (state.phase === 'review') return;
+  if (state.round < state.calendar.length && raceDue(state)) return 'race';
+  if (state.week >= YEAR_WEEKS) { seasonEnd(state); return 'end'; }
+  weekTick(state);
+  state.week++;
+  if (state.week === state.schedule.devOpen) note(state, 'good', 'Development window is open: upgrade projects can start.');
+  if (state.week === state.schedule.testing) note(state, 'info', 'Pre-season testing this week — the car runs for the first time.');
+  return state.pendingEvent ? 'event' : 'ok';
+}
+export function advanceToRace(state, maxWeeks = 60) {
+  let g = 0; let r = 'ok';
+  while (g++ < maxWeeks && state.round < state.calendar.length && !raceDue(state)) { r = advanceWeek(state); if (r === 'event') break; }
+  return r;
+}
+export function closeYear(state) {
+  let g = 0; while (state.phase !== 'review' && g++ < 60) { const r = advanceWeek(state); if (r === 'end') break; if (state.pendingEvent) state.pendingEvent = null; }
+}
+export function weekTick(state) { return betweenRaces(state, 1); }
 function sponsorMet(s, mine) {
   if (s.objective === 'points') return mine.filter((x) => x.pts > 0).length >= s.target;
   if (s.objective === 'top') return mine.some((x) => !x.dnf && x.pos <= s.target);
@@ -133,30 +165,37 @@ function sponsorMet(s, mine) {
 
 // ---------------- Between races ----------------
 export function betweenRaces(state, weeks = 2) {
-  const r = rngOf(state, 'wk' + state.round + state.season);
+  const r = rngOf(state, 'wk' + state.round + state.season + ':' + (state.week || 0));
+  const pk = weeks / 2; // event probabilities were tuned per 2-week gap
   const P = pt(state); const diff = diffOf(state);
   for (let w = 0; w < weeks; w++) { progressProjects(state, r); progressFacilities(state); }
   // staff fatigue/morale
   const active = state.projects.filter((p) => p.stage === 'design' || p.stage === 'manufacturing').length;
   for (const [k, d] of Object.entries(P.depts)) {
     const load = state.projects.filter((p) => (p.stage === 'design' && p.dept === k) || (p.stage === 'manufacturing' && k === 'mfg')).length;
-    d.workload = clamp(30 + load * 30 / Math.max(1, d.headcount / 3) + (P.crunch ? 25 : 0), 0, 130);
-    const tol = d.head.spec === 'Motivator' ? 4 : 0;
-    d.fatigue = clamp(d.fatigue + (d.workload - 60) * 0.12 - 3 - tol, 0, 100);
+    // workload from the SIZE of the work (both-car sets, aggressive concepts and long projects weigh more)
+    const size = state.projects.filter((p) => (p.stage === 'design' && p.dept === k) || (p.stage === 'manufacturing' && k === 'mfg'))
+      .reduce((a, p) => a + (p.qty === 1 ? 0.7 : 1) * ({ conservative: 0.8, standard: 1, aggressive: 1.35 }[p.approach] || 1) * clamp((p.totalWeeks || 4) / 4, 0.6, 1.8), 0);
+    d.workload = clamp(25 + size * 32 / Math.max(1, d.headcount / 3) + (P.crunch && load ? 25 : 0), 0, 140);
+    const tol = d.head.spec === 'Motivator' ? 2 : 0;
+    const BASE = FATIGUE_BASE;
+    if (!load && !P.crunch) d.fatigue = Math.max(BASE, d.fatigue - (4 + tol) * weeks); // idle: recover back to the common baseline
+    else d.fatigue = clamp(d.fatigue + ((d.workload - 55) * 0.07 - tol) * weeks, BASE - 5, 100);
     const pay = d.head.salary > (0.25 + (d.head.skill / 100) ** 3 * 3.2) * 1e6 ? 0.5 : -0.3;
     d.morale = clamp(d.morale + (70 - d.morale) * 0.05 - Math.max(0, d.fatigue - 50) * 0.08 + pay + (P.facilities ? avg(Object.values(P.facilities)) - 2.5 : 0) * 0.2, 10, 100);
     d.head.fatigue = d.fatigue; d.head.morale = d.morale;
     // skill growth
-    if (d.head.skill < d.head.potential && r.chance(0.12)) d.head.skill++;
-    if (d.head.age > 58 && r.chance(0.06)) d.head.skill--;
+    if (d.head.skill < d.head.potential && r.chance(0.12 * pk)) d.head.skill++;
+    if (d.head.age > 58 && r.chance(0.06 * pk)) d.head.skill--;
   }
   if (active === 0) P.crunch = false;
+  if (P.crunch) ledger(state, 'Staff', -0.3e6 * weeks, 'Crunch overtime & night shifts');
   // AI development
-  aiDevelop(state, r);
+  if (r.chance(pk)) aiDevelop(state, r);
   // driver development (player's coach)
-  for (const did of P.drivers) growDriver(state.drivers[did], deptQ(P, 'drv') + facLvl(P, 'simulator') * 4, r, 0.18);
+  for (const did of P.drivers) growDriver(state.drivers[did], deptQ(P, 'drv') + facLvl(P, 'simulator') * 4, r, 0.18 * pk);
   // poaching
-  if (r.chance(0.12 * diff.events)) {
+  if (r.chance(0.12 * pk * diff.events)) {
     const cands = Object.entries(P.depts).filter(([, d]) => d.head.skill > 68);
     if (cands.length && !state.pendingEvent) {
       const [k, d] = r.pick(cands); const rival = r.pick(Object.values(state.teams).filter((t) => !t.isPlayer));
@@ -165,7 +204,7 @@ export function betweenRaces(state, weeks = 2) {
     }
   }
   // random event
-  if (!state.pendingEvent && r.chance(0.38 * diff.events)) {
+  if (!state.pendingEvent && r.chance(0.38 * pk * diff.events)) {
     const recent = state._recentEvents || [];
     const pool = EVENTS.filter((e) => !recent.includes(e.id));
     const e = r.pick(pool.length ? pool : EVENTS);
@@ -180,18 +219,19 @@ export function betweenRaces(state, weeks = 2) {
     note(state, 'warn', `REGULATIONS: "${reg.name}" confirmed for next season. ${reg.desc}`);
   }
   // sponsor offers
-  if (state.sponsors.length < 4 && r.chance(0.5)) {
+  if (state.sponsors.length < 4 && r.chance(0.5 * pk)) {
     const have = new Set(state.sponsors.map((s) => s.id));
     const pool = SPONSOR_POOL.filter((s) => !have.has(s.id) && s.minRep <= P.rep + deptQ(P, 'com') * 0.2);
     if (pool.length) { const s = r.pick(pool); const offer = { ...s, perRace: s.perRace * (0.8 + deptQ(P, 'com') / 250) * r.range(0.85, 1.15), racesLeft: len - state.round + r.int(0, len), sat: 60, expires: state.round + 2 }; state.sponsorOffers = [offer, ...state.sponsorOffers.filter((o) => o.id !== s.id && o.expires > state.round)].slice(0, 3); note(state, 'info', `${s.name} has made a sponsorship offer.`); }
   }
   state.sponsorOffers = state.sponsorOffers.filter((o) => o.expires >= state.round);
   // staff market churn
-  if (r.chance(0.3)) { state.staffMarket.shift(); state.staffMarket.push(...genStaffMarket(r, 1)); }
+  if (r.chance(0.3 * pk)) { state.staffMarket.shift(); state.staffMarket.push(...genStaffMarket(r, 1)); }
   // cash crisis
-  if (P.cash < 0) note(state, 'bad', `Cash is negative (${money(P.cash)}). Consider a loan, sponsor advance, or cutting costs.`);
-  if (P.budgetSpent > COST_CAP * 0.9) note(state, 'warn', `Cost-cap spending at ${Math.round(P.budgetSpent / COST_CAP * 100)}%. Exceeding it brings a points deduction.`);
-  if (state.board.confidence < 25) note(state, 'bad', `Board confidence is critical (${Math.round(state.board.confidence)}). Results are needed.`);
+  const remind = weeks > 1 || (state.week || 0) % 4 === 0;
+  if (remind && P.cash < 0) note(state, 'bad', `Cash is negative (${money(P.cash)}). Consider a loan, sponsor advance, or cutting costs.`);
+  if (remind && P.budgetSpent > COST_CAP * 0.9) note(state, 'warn', `Cost-cap spending at ${Math.round(P.budgetSpent / COST_CAP * 100)}%. Exceeding it brings a points deduction.`);
+  if (remind && state.board.confidence < 25) note(state, 'bad', `Board confidence is critical (${Math.round(state.board.confidence)}). Results are needed.`);
   commit(state, r);
 }
 
@@ -204,7 +244,7 @@ export function projectPreview(state, tplId, approach, qty = 2) {
   const pos = teamPos(state, state.player);
   const atr = tpl.aero ? ATR_TABLE[clamp(pos - 1, 0, 9)] : 1;
   const qual = (0.55 + q / 180 + fac * 0.06) * bias * atr;
-  const speed = (0.6 + q / 200 + facLvl(P, 'rnd') * 0.08) * (ph.devSpeed || 1) * (P.crunch ? 1.25 : 1) * (1 - (P.nextYearFocus || 0) * 0.6) * (1 - P.depts[tpl.dept].fatigue / 250);
+  const speed = (0.6 + q / 200 + facLvl(P, 'rnd') * 0.08) * (ph.devSpeed || 1) * (1 - (P.nextYearFocus || 0) * 0.6) * (1 - P.depts[tpl.dept].fatigue / 250);
   const weeks = Math.max(1, Math.round(tpl.weeks * A.time / speed));
   const expected = {}; for (const [k, v] of Object.entries(tpl.effects)) expected[k] = v * A.gain * qual;
   for (const [k, v] of Object.entries(tpl.side)) expected[k] = (expected[k] || 0) + v * A.side;
@@ -239,7 +279,7 @@ export function startProject(state, tplId, approach, qty = 2) {
 function progressProjects(state, r) {
   for (const p of state.projects) {
     if (p.stage === 'design') {
-      p.weeksLeft--; 
+      p.weeksLeft--; if (pt(state).crunch && r.chance(0.3)) p.weeksLeft--; // crunch: extra progress ~30% of weeks
       if (p.weeksLeft <= 0) {
         if (p.failed && p.detectable) { p.stage = 'failed'; note(state, 'bad', `${p.name}: prototype failed validation — the concept did not deliver. Design cost lost, but no bad parts reach the car.`); continue; }
         p.stage = 'manufacturing'; p.weeksLeft = p.mfgWeeks + (state._mfgDelay || 0);
@@ -548,7 +588,7 @@ export function startNextSeason(state) {
   state.staffMarket = genStaffMarket(r, 10);
   state.sponsors.forEach((s) => { s.racesLeft = Math.max(s.racesLeft, 0); });
   state.projects = []; // new chassis: in-flight concepts do not carry over
-  state.season++; state.year++; state.round = 0; state.results = state.results.filter((x) => x.season >= state.season - 2);
+  state.season++; state.year++; state.round = 0; state.results = state.results.filter((x) => x.season >= state.season - 5); state.week = 1; state.schedule = null; ensureSchedule(state);
   state.calendar = pickCalendar(r, state.calendar.length, state.calendarOrder);
   state.regulation = { next: null, announced: false };
   if (state.pendingCapPen) { P.points = -state.pendingCapPen; state.pendingCapPen = 0; }

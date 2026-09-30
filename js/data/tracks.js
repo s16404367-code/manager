@@ -92,6 +92,7 @@ export function climateAir(track, month) {
 }
 // Month for a given round: real calendar -> real month; custom/random order -> spread March..December
 export function monthFor(state, round) {
+  if (state.schedule?.weeks?.[round] != null) { const y = state.schedule.year; const d = new Date(Date.UTC(y, 0, 1)); d.setUTCDate(1 + ((8 - d.getUTCDay()) % 7) + (state.schedule.weeks[round] - 1) * 7); return d.getUTCMonth() + 1; }
   const id = state.calendar[round]; const idx = TRACKS.findIndex((t) => t.id === id);
   if (state.calendarOrder !== 'random' && idx >= 0) return MONTH_2026[idx];
   const n = state.calendar.length; return Math.min(12, 3 + Math.floor((round / Math.max(1, n)) * 10));
