@@ -1,0 +1,295 @@
+// Race weekend orchestration: preparation, practice, qualifying, strategy, race creation, classification.
+import { RNG, hashStr } from '../sim/rng.js';
+import { clamp, avg } from '../sim/util.js';
+import { trackById } from '../data/tracks.js';
+import { PERSONALITIES } from '../data/drivers.js';
+import { effectiveCar, trackScore, carDeficitSec, setupOptimum, setupQuality, setupEffects, defaultSetup, SETUP_KEYS, SETUP_LABEL } from './carModel.js';
+import { generateWeather, forecast } from './weatherEngine.js';
+import { planOptions, labelPlans, clonePlan } from './strategyEngine.js';
+import { wearPerLap, COMPOUNDS, wetPenalty } from './tyreEngine.js';
+import { createRace } from './raceEngine.js';
+import { deptQ, facLvl, pitCrew, forecastAccuracy, DIFFICULTY, teamDrivers, POINTS } from './world.js';
+
+export function startWeekend(state) {
+  const trackId = state.calendar[state.round];
+  const t = trackById(trackId);
+  const seed = (state.seed ^ hashStr(trackId + state.season + ':' + state.round)) >>> 0;
+  const rng = new RNG(seed);
+  const laps = Math.max(8, Math.round(t.laps * state.raceLength));
+  const scale = clamp(t.laps / laps, 1, 4);
+  const weather = generateWeather(t, laps, rng, state.forceWeather ?? null);
+  const qWet = rng.chance(t.wx * 0.3) ? rng.range(0.15, 0.8) : 0;
+  const pt = state.teams[state.player];
+  const diff = DIFFICULTY[state.difficulty];
+  const acc = forecastAccuracy(pt, diff);
+  const wk = {
+    trackId, round: state.round, seed, laps, scale, weather, qWet, phase: 'prep', forecastAcc: acc,
+    forecast: forecast(weather, laps, acc, rng.fork(3)), qForecast: Math.round(clamp(acc * (qWet > 0 ? 1 : 0) + (1 - acc) * rng.next(), 0, 1) * 100),
+    opt: {}, noise: {}, setups: {}, knowledge: {}, tyreKnow: 0.15 + facLvl(pt, 'simulator') * 0.05, qualiPrep: {}, relBurn: {},
+    practice: { done: 0, total: state.mode === 'quick' ? 1 : 3, reports: [] },
+    quali: { session: 0, results: [], eliminated: [], plans: {} }, grid: null, strategy: {}, fuel: {}, race: null, result: null,
+  };
+  for (const team of Object.values(state.teams)) {
+    team.drivers.forEach((did, slot) => {
+      const car = effectiveCar(team, slot);
+      wk.opt[did] = setupOptimum(t, car, rng);
+      if (team.isPlayer) {
+        wk.noise[did] = Object.fromEntries(SETUP_KEYS.map((k) => [k, rng.normal(0, 1)]));
+        const simB = facLvl(team, 'simulator') * 0.06 + deptQ(team, 'vd') * 0.002;
+        wk.knowledge[did] = Object.fromEntries(SETUP_KEYS.map((k) => [k, clamp(0.1 + simB + (state.setupPenalty || 0), 0, 0.9)]));
+        wk.setups[did] = defaultSetup();
+        wk.qualiPrep[did] = 0;
+      }
+    });
+  }
+  state.setupPenalty = 0;
+  state.weekend = wk;
+  return wk;
+}
+
+export function engineerEstimate(wk, did) {
+  const o = wk.opt[did], n = wk.noise[did], k = wk.knowledge[did];
+  return Object.fromEntries(SETUP_KEYS.map((key) => [key, clamp(Math.round((o[key] + n[key] * (1 - k[key]) * 3.2) * 2) / 2, 0, 10)]));
+}
+
+export const PRACTICE_PROGRAMS = {
+  setup: { label: 'Setup work', desc: 'Converge on the setup optimum. Improves engineer estimates.' },
+  longrun: { label: 'Long runs', desc: 'Learn tyre degradation. Better strategy estimates.' },
+  qualisim: { label: 'Qualifying simulation', desc: 'Low-fuel runs. Small quali pace gain (~0.05–0.1s).' },
+  correlation: { label: 'Aero correlation test', desc: 'Measure newly deployed parts — reveals real gain.' },
+  reliability: { label: 'Reliability run', desc: 'Burn-in checks: 12% lower failure risk this weekend, adds PU mileage.' },
+};
+
+export function runPractice(state, programs) {
+  const wk = state.weekend; const t = trackById(wk.trackId);
+  const rng = new RNG((wk.seed + 101 * (wk.practice.done + 1)) >>> 0);
+  const pt = state.teams[state.player];
+  const lines = [];
+  const quick = state.mode === 'quick';
+  const mult = quick ? 2.2 : 1;
+  for (const did of pt.drivers) {
+    const d = state.drivers[did]; const prog = programs[did] || 'setup';
+    const fb = d.fb + (PERSONALITIES[d.pers]?.fbBonus || 0);
+    const k = wk.knowledge[did];
+    if (prog === 'setup' || prog === 'qualisim') {
+      const g = (prog === 'setup' ? 0.22 + fb / 500 + deptQ(pt, 'vd') / 600 : 0.08) * mult;
+      for (const key of SETUP_KEYS) k[key] = clamp(k[key] + g * rng.range(0.7, 1.2), 0, 0.97);
+      // feedback — direction hints, accuracy tied to feedback skill
+      const est = engineerEstimate(wk, did); const cur = wk.setups[did];
+      const hints = [];
+      for (const key of SETUP_KEYS) {
+        const dlt = est[key] - cur[key];
+        if (Math.abs(dlt) >= 1) {
+          const wrong = rng.chance(clamp(0.35 - fb / 400, 0.03, 0.3));
+          const dir = (dlt > 0) !== wrong ? 'more' : 'less';
+          hints.push(`${SETUP_LABEL[key]}: wants ${dir}${wrong ? '' : ''}`);
+        }
+      }
+      lines.push({ did, prog, text: hints.length ? `${d.name}: ${hints.slice(0, 3).join('; ')}.` : `${d.name}: "The balance feels close to right."` });
+    }
+    if (prog === 'qualisim') { wk.qualiPrep[did] = Math.min(0.12, (wk.qualiPrep[did] || 0) + 0.06 * mult); lines.push({ did, prog, text: `${d.name} completed low-fuel runs. Quali preparation improved.` }); }
+    if (prog === 'longrun') {
+      wk.tyreKnow = clamp(wk.tyreKnow + 0.3 * mult, 0, 0.95);
+      const car = effectiveCar(pt, pt.drivers.indexOf(did));
+      const deg = ['S', 'M', 'H'].map((c) => { const w = wearPerLap({ c, track: t, car, driver: d, mode: 'normal', wetness: 0, scale: wk.scale }); const e = w * (1 + rng.normal(0, 0.25 * (1 - wk.tyreKnow))); return `${COMPOUNDS[c].name} ~${e.toFixed(1)}%/lap`; });
+      lines.push({ did, prog, text: `${d.name} long run — measured wear: ${deg.join(', ')}.` });
+    }
+    if (prog === 'correlation') {
+      const pending = state.projects.filter((p) => p.stage === 'deployed' && !p.revealed);
+      if (!pending.length) lines.push({ did, prog, text: `${d.name}: no unmeasured parts on the car — time used for baseline aero maps (small setup gain).` });
+      pending.forEach((p) => { p.revealed = true; lines.push({ did, prog, text: `Correlation: ${p.name} measured at ${fmtFx(p.actual)} vs predicted ${fmtFx(p.expected)}.` }); });
+      for (const key of SETUP_KEYS) k[key] = clamp(k[key] + 0.05, 0, 0.97);
+    }
+    if (prog === 'reliability') { wk.relBurn[did] = true; lines.push({ did, prog, text: `${d.name} completed reliability checks. ${pt.car.reliability < 65 ? 'Engineers flagged a marginal hydraulic pressure trace.' : 'No issues found.'}` }); }
+  }
+  wk.practice.done++;
+  wk.practice.reports.push({ session: wk.practice.done, lines });
+  return lines;
+}
+function fmtFx(fx) { return Object.entries(fx || {}).filter(([, v]) => Math.abs(v) > 0.05).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v.toFixed(1)}`).join(', ') || 'no change'; }
+
+// Per-car single-lap pace for qualifying
+function qualiLap(state, team, slot, did, t, wet, rng, plan) {
+  const wk = state.weekend; const d = state.drivers[did];
+  const car = effectiveCar(team, slot);
+  const perf = carDeficitSec(trackScore(car, t).score, t);
+  const sq = team.isPlayer ? setupQuality(wk.setups[did], wk.opt[did]) : aiSetupQ(team, rng);
+  const fx = team.isPlayer ? setupEffects(wk.setups[did], wk.opt[did], t) : { topSpeed: 0 };
+  const tyre = wet > 0.6 ? 'W' : wet > 0.16 ? 'I' : 'S';
+  const chosen = team.isPlayer && plan?.tyre ? plan.tyre : tyre;
+  let lt = t.baseLap + perf + (100 - d.pace) * 0.035 + (1 - sq) * 0.9 - (wk.qualiPrep[did] || 0) + wetPenalty(chosen, wet) + wet * 6 + wet * (100 - d.wet) * 0.04 - fx.topSpeed * t.drag * 2 + 5 * 0.032 - 0.45;
+  const push = plan?.push || 'normal';
+  lt += { safe: 0.08, normal: 0, max: -0.12 }[push];
+  const mistakeP = { safe: 0.03, normal: 0.07, max: 0.15 }[push] * (1 + wet) * (1 + (100 - d.cons) / 50);
+  const runs = plan?.run === 'late' ? 1 : 2;
+  let best = Infinity; const notes = [];
+  for (let r = 0; r < runs; r++) {
+    let x = lt + rng.normal(0, 0.06 + (100 - d.cons) * 0.006);
+    const evo = t.evo * 0.35 * (plan?.run === 'late' ? 1 : plan?.run === 'early' ? 0.2 : r === 1 ? 0.8 : 0.3);
+    x -= evo;
+    if (plan?.run === 'late' && rng.chance(0.1 + t.traffic * 0.08)) { x += rng.range(0.3, 0.8); notes.push('caught in traffic'); }
+    if (plan?.run === 'late' && rng.chance(0.04)) { x = Infinity; notes.push('red flag ended session before final run'); }
+    if (rng.chance(mistakeP)) { x += rng.range(0.6, 2.2); notes.push('mistake on push lap'); }
+    best = Math.min(best, x);
+  }
+  if (!Number.isFinite(best)) best = lt + 1.5; // fallback banker from practice-style lap
+  return { time: best, notes, sq };
+}
+export function aiSetupQ(team, rng) { return clamp(0.78 + deptQ(team, 'vd') * 0.0018 + rng.range(-0.06, 0.06), 0.6, 0.99); }
+
+export function runQualiSession(state, plans) {
+  const wk = state.weekend; const t = trackById(wk.trackId);
+  const s = wk.quali.session; // 0,1,2
+  const rng = new RNG((wk.seed + 777 * (s + 1)) >>> 0);
+  const wet = clamp(wk.qWet + rng.normal(0, 0.05) * (wk.qWet > 0 ? 1 : 0), 0, 1);
+  const out = [];
+  for (const team of Object.values(state.teams)) {
+    team.drivers.forEach((did, slot) => {
+      if (wk.quali.eliminated.includes(did)) return;
+      const aiPlan = { run: rng.pick(['banker', 'banker', 'late']), push: team.aiStyle === 'aggressive' ? 'max' : 'normal' };
+      const r = qualiLap(state, team, slot, did, t, wet, rng, team.isPlayer ? plans[did] : aiPlan);
+      out.push({ did, teamId: team.id, ...r });
+    });
+  }
+  out.sort((a, b) => a.time - b.time);
+  wk.quali.results[s] = out.map((o) => ({ did: o.did, teamId: o.teamId, time: o.time, notes: o.notes }));
+  wk.quali.wet = wet;
+  const cut = s === 0 ? 15 : s === 1 ? 10 : 99;
+  out.slice(cut).forEach((o) => wk.quali.eliminated.push(o.did));
+  wk.quali.session++;
+  if (wk.quali.session >= 3) buildGrid(state);
+  return out;
+}
+function buildGrid(state) {
+  const wk = state.weekend; const r = wk.quali.results;
+  const order = [...r[2].map((x) => x.did)];
+  for (const x of r[1]) if (!order.includes(x.did)) order.push(x.did);
+  for (const x of r[0]) if (!order.includes(x.did)) order.push(x.did);
+  // grid penalties (PU allocation)
+  const pens = state.gridPenalties || {};
+  const withPen = order.map((did, i) => ({ did, key: i + (pens[did] || 0) + i * 0.001 }));
+  withPen.sort((a, b) => a.key - b.key);
+  wk.grid = withPen.map((x) => x.did);
+  wk.gridPens = { ...pens }; state.gridPenalties = {};
+}
+
+export function strategyContext(state, did) {
+  const wk = state.weekend; const t = trackById(wk.trackId);
+  const team = state.teams[state.drivers[did].teamId];
+  const car = effectiveCar(team, team.drivers.indexOf(did));
+  return { track: t, laps: wk.laps, car, driver: state.drivers[did], scale: wk.scale };
+}
+export function defaultPlans(state) {
+  const wk = state.weekend; const pt = state.teams[state.player];
+  for (const did of pt.drivers) {
+    if (!wk.strategy[did]) {
+      const opts = planOptions(strategyContext(state, did));
+      wk.strategy[did] = clonePlan(opts[0]);
+      wk.fuel[did] = 1;
+    }
+  }
+}
+
+export function buildRace(state) {
+  const wk = state.weekend; const t = trackById(wk.trackId);
+  const rng = new RNG((wk.seed + 999) >>> 0);
+  const diff = DIFFICULTY[state.difficulty];
+  defaultPlans(state);
+  const entries = [];
+  for (const team of Object.values(state.teams)) {
+    team.drivers.forEach((did, slot) => {
+      const d = state.drivers[did];
+      const car = effectiveCar(team, slot);
+      const perf = carDeficitSec(trackScore(car, t).score, t);
+      let plan, setupQ, setupFx;
+      if (team.isPlayer) {
+        plan = clonePlan(wk.strategy[did]); setupQ = setupQuality(wk.setups[did], wk.opt[did]); setupFx = setupEffects(wk.setups[did], wk.opt[did], t);
+      } else {
+        const opts = planOptions({ track: t, laps: wk.laps, car, driver: d, scale: wk.scale });
+        const noise = (1 - Math.min(1, diff.ai)) * 3 + 0.4;
+        const idx = team.aiStyle === 'aggressive' ? Math.min(opts.length - 1, rng.int(0, 2)) : team.aiStyle === 'conservative' ? 0 : Math.min(opts.length - 1, Math.floor(Math.abs(rng.normal(0, noise))));
+        plan = clonePlan(opts[idx] || opts[0]);
+        // wet start
+        if (wk.weather.wet[0] > 0.16) plan.start = wk.weather.wet[0] > 0.6 ? 'W' : 'I';
+        setupQ = aiSetupQ(team, rng); setupFx = { wearMult: 1, frontBias: 0, damageRisk: 1, topSpeed: 0 };
+      }
+      if (team.isPlayer && wk.weather.wet[0] > 0.16 && ['S', 'M', 'H'].includes(plan.start) && wk.startTyre?.[did] == null) {/* player chose */}
+      if (team.isPlayer && wk.startTyre?.[did]) plan.start = wk.startTyre[did];
+      const relFac = team.isPlayer ? relMultiplier(state, team, did) : clamp(1.1 - deptQ(team, 'rel') * 0.004, 0.7, 1.2);
+      entries.push({
+        driverId: did, teamId: team.id, name: d.name, short: d.name.split(' ').slice(-1)[0], abbr: team.abbr, color: team.color,
+        isPlayer: team.isPlayer, slot, grid: wk.grid.indexOf(did) + 1, drv: d, car, perf, setupQ, setupFx, plan,
+        crew: pitCrew(team), relMult: relFac * (wk.relBurn[did] ? 0.88 : 1), fuelLoad: team.isPlayer ? wk.fuel[did] || 1 : 1, aiStyle: team.aiStyle,
+      });
+    });
+  }
+  entries.sort((a, b) => a.grid - b.grid);
+  wk.race = createRace({ track: t, laps: wk.laps, entries, weather: wk.weather, seed: rng.int(1, 2 ** 31), scale: wk.scale, difficulty: state.difficulty });
+  wk.phase = 'race';
+  return wk.race;
+}
+function relMultiplier(state, team, did) {
+  const slot = team.drivers.indexOf(did);
+  const used = team.pu?.[slot] || 0;
+  const allowed = Math.max(2, Math.ceil(state.calendar.length / 4));
+  const over = used > allowed ? 1.25 : 1;
+  const fat = 1 + (team.depts.rel.fatigue + team.depts.ops.fatigue) * 0.004;
+  return clamp((1.1 - deptQ(team, 'rel') * 0.004 - facLvl(team, 'relLab') * 0.03) * over * fat, 0.55, 1.6);
+}
+
+// Classification & analysis ---------------------------------------------------
+export function classify(state) {
+  const wk = state.weekend; const race = wk.race; const t = trackById(wk.trackId);
+  const order = [...race.cars].sort((a, b) => (!!a.dnf - !!b.dnf) || (b.lapsDone - a.lapsDone) || (a.total - b.total));
+  const winner = order[0];
+  const rows = order.map((c, i) => ({
+    pos: i + 1, did: c.driverId, teamId: c.teamId, grid: c.grid, dnf: c.dnf, laps: c.lapsDone,
+    gap: c.dnf ? null : c.lapsDone < winner.lapsDone ? `+${winner.lapsDone - c.lapsDone}L` : i === 0 ? race.laps + ' laps' : `+${(c.total - winner.total).toFixed(1)}s`,
+    pts: !c.dnf && i < 10 ? POINTS[i] : 0, best: c.bestLap, stops: c.stops.length, stints: c.stints, penalty: c.penalty,
+  }));
+  wk.result = { rows, trackId: t.id, wet: race.wetRace, sc: race.sc.count, vsc: race.sc.vscCount, laps: race.laps, round: wk.round };
+  wk.analysis = analyse(state);
+  wk.phase = 'post';
+  return wk.result;
+}
+
+export function analyse(state) {
+  const wk = state.weekend; const race = wk.race; const t = trackById(wk.trackId);
+  const pt = state.teams[state.player];
+  const cars = race.cars;
+  const green = (c) => { const l = c.laps.filter((x, i) => i > 0 && x < t.baseLap * 1.15); return l.length ? avg(l) : Infinity; };
+  const paceRank = [...cars].filter((c) => !c.dnf).sort((a, b) => green(a) - green(b)).map((c) => c.id);
+  const out = [];
+  for (const did of pt.drivers) {
+    const c = cars.find((x) => x.id === did); const d = state.drivers[did];
+    const row = wk.result.rows.find((r) => r.did === did);
+    const why = [];
+    const pr = paceRank.indexOf(did) + 1;
+    if (c.dnf) why.push({ k: 'bad', t: `Retired: ${c.dnf} on lap ${c.lapsDone}.` + (/(failure|fault)/i.test(c.dnf) ? ` Car reliability ${Math.round(c.car.reliability)} and component stress at this circuit (engine stress ${Math.round(t.eng * 100)}%) raised the risk.` : '') });
+    else {
+      why.push({ k: 'info', t: `Started P${c.grid}, finished P${row.pos} (${row.pos < c.grid ? '+' : ''}${c.grid - row.pos} places). Race pace rank: ${pr}/${paceRank.length}.` });
+      if (pr < row.pos - 2) why.push({ k: 'warn', t: `Pace was better than the result: stuck in traffic/dirty air (overtaking difficulty ${Math.round(t.ovt * 100)}%). A better grid slot or offset strategy would have helped.` });
+      if (pr > row.pos + 2) why.push({ k: 'good', t: 'Result beat underlying pace — track position, strategy or rival problems helped.' });
+    }
+    const sq = setupQuality(wk.setups[did], wk.opt[did]);
+    why.push({ k: sq > 0.9 ? 'good' : sq > 0.75 ? 'info' : 'warn', t: `Setup quality ≈ ${Math.round(sq * 100)}% (costing ~${((1 - sq) * 0.9).toFixed(2)}s/lap).${sq < 0.8 ? ' More practice setup work would have closed the gap.' : ''}` });
+    const sc = trackScore(c.car, t);
+    const b = sc.breakdown;
+    const strongest = [['cornering', b.corner], ['straight-line', b.straight], ['mechanical grip', b.mech], ['braking', b.braking]].sort((x, y) => y[1] - x[1]);
+    why.push({ k: 'info', t: `Car suited this track via ${strongest[0][0]}; weakest in ${strongest[3][0]}.${b.coolPen > 0.5 ? ` Cooling deficit cost performance (≈${b.coolPen.toFixed(1)} rating pts).` : ''}` });
+    if (c.stops.length) why.push({ k: 'info', t: `Pit stops: ${c.stops.map((s) => `L${s.lap} ${s.from}→${s.to} (${s.stat}s stationary${s.sc !== 'none' ? ', under ' + s.sc.toUpperCase() : ''})`).join('; ')}.` });
+    const slow = c.stops.filter((s) => s.stat > 4.5); if (slow.length) why.push({ k: 'bad', t: `${slow.length} slow stop(s) — pit crew morale/fatigue and training level matter.` });
+    const cheap = c.stops.filter((s) => s.sc !== 'none'); if (cheap.length) why.push({ k: 'good', t: 'Pitted under neutralisation, saving ~40% of pit-loss.' });
+    const maxWear = Math.max(0, ...c.laps.map(() => 0), c.tyre.wear);
+    if (c.incidents.length) why.push({ k: 'warn', t: `Incidents: ${c.incidents.map((i) => `L${i.lap} ${i.text}`).join(', ')}.` });
+    if (race.wetRace) why.push({ k: 'info', t: `Wet running: ${d.name}'s wet skill ${d.wet} ${d.wet > 85 ? 'was an asset' : 'limited gains'}.` });
+    if (c.penalty) why.push({ k: 'bad', t: `Received a ${c.penalty}s time penalty.` });
+    if (maxWear > 80 && !c.dnf) why.push({ k: 'warn', t: `Finished on heavily worn tyres (${Math.round(maxWear)}%).` });
+    out.push({ did, name: d.name, why, paceRank: pr });
+  }
+  // strategy comparison with nearest rival
+  const rivals = cars.filter((c) => !c.isPlayer && !c.dnf).slice(0, 20);
+  const strat = {};
+  for (const c of rivals.slice(0, 6)) strat[c.id] = c.stints.map((s) => s.c).join('-');
+  return { drivers: out, paceRank, rivalStrats: strat };
+}

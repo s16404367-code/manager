@@ -1,0 +1,24 @@
+#app{min-height:100%;display:flex;flex-direction:column}
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:.8rem;padding:.5rem .9rem;background:rgba(11,14,20,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:.5rem;font-weight:800;letter-spacing:.02em;white-space:nowrap}.brand .logo{width:28px;height:28px;border-radius:6px;background:linear-gradient(135deg,var(--team),var(--team2));display:grid;place-items:center;font-size:.7rem;color:#000;font-weight:900}
+.topstats{display:flex;gap:1rem;margin-left:auto;align-items:center;font-size:.85rem}.topstats .s{display:flex;flex-direction:column;line-height:1.1}.topstats .s span{color:var(--muted);font-size:.7rem;text-transform:uppercase}
+.shell{display:flex;flex:1;min-height:0}
+.sidenav{width:210px;flex:none;border-right:1px solid var(--line);padding:.6rem;display:flex;flex-direction:column;gap:2px;position:sticky;top:53px;height:calc(100vh - 53px);overflow-y:auto}
+.sidenav .grp{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:.8rem .5rem .3rem}
+.sidenav a{display:flex;align-items:center;gap:.6rem;padding:.5rem .6rem;border-radius:8px;color:var(--text);text-decoration:none;font-size:.92rem}.sidenav a:hover{background:var(--panel)}.sidenav a.on{background:var(--panel2);box-shadow:inset 3px 0 var(--accent)}
+.sidenav a .badge{margin-left:auto;background:var(--accent);color:#fff;border-radius:99px;font-size:.7rem;padding:0 .45em}
+main{flex:1;min-width:0;padding:1.1rem;max-width:1500px;margin:0 auto;width:100%}
+.pagehead{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;margin-bottom:1rem}.pagehead h1{margin:0}
+.bottomnav{display:none}
+.toast-wrap{position:fixed;right:1rem;bottom:1rem;z-index:100;display:flex;flex-direction:column;gap:.5rem;max-width:min(380px,90vw)}
+.toast{background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--info);padding:.7rem .9rem;border-radius:8px;box-shadow:var(--shadow);font-size:.9rem;animation:tin .2s}.toast.good{border-left-color:var(--good)}.toast.bad{border-left-color:var(--bad)}.toast.warn{border-left-color:var(--warn)}
+@keyframes tin{from{transform:translateY(10px);opacity:0}}
+.modal-back{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:90;display:grid;place-items:center;padding:1rem}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:560px;width:100%;max-height:90vh;overflow:auto;padding:1.2rem;box-shadow:var(--shadow)}.modal.wide{max-width:860px}
+.modal .opts{display:flex;flex-direction:column;gap:.5rem;margin-top:1rem}.modal .opts .btn{justify-content:flex-start;text-align:left;white-space:normal;height:auto;padding:.7rem .9rem}
+.menu-hero{min-height:100vh;display:grid;place-items:center;padding:1.5rem;background:radial-gradient(1200px 600px at 70% -10%,rgba(225,6,0,.25),transparent),radial-gradient(800px 500px at 0% 110%,rgba(74,163,255,.12),transparent)}
+.menu-box{max-width:980px;width:100%}.menu-title{font-size:clamp(2rem,6vw,3.6rem);font-weight:900;letter-spacing:-.02em;line-height:1}.menu-title em{color:var(--accent);font-style:normal}
+.menu-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin-top:1.5rem}
+.menu-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.2rem;cursor:pointer;text-align:left;transition:.15s;min-height:120px}.menu-card:hover{border-color:var(--accent);transform:translateY(-2px)}.menu-card b{font-size:1.1rem;display:block;margin-bottom:.3rem}
+.choice{border:1px solid var(--line);border-radius:10px;padding:.8rem;cursor:pointer;background:var(--panel2);text-align:left;width:100%}.choice.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.stepper{display:flex;gap:.3rem;margin-bottom:1rem;overflow-x:auto}.stepper div{flex:1;min-width:90px;padding:.5rem;border-radius:8px;background:var(--panel);border:1px solid var(--line);font-size:.8rem;text-align:center;color:var(--muted)}.stepper div.on{border-color:var(--accent);color:var(--text)}.stepper div.done{color:var(--good)}
