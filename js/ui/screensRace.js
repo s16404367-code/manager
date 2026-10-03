@@ -92,6 +92,7 @@ function recommendation(race, p) {
   if (p.type === 'sc' || p.type === 'vsc') for (const c of mine) { const left = race.laps - c.lapsDone; const next = c.plan.stops[c.planIdx]; if (left > 4 && (c.tyre.wear > 35 || (next && next.lap - c.lapsDone < 10))) recs.push(`Box ${c.short} for ${left > 15 / race.scale ? 'Hards' : 'Mediums'}`); else recs.push(`Keep ${c.short} out (track position)`); }
   if (p.type === 'rain') recs.push(race.wetness > 0.2 ? 'Switch to Intermediates now' : 'Wait one more lap — crossover is close');
   if (p.type === 'dry') recs.push(race.wetness < 0.1 ? 'Switch to slicks now' : 'Hold on inters one more lap');
+  if (p.type === 'pitconfirm') { const c = carById(race, p.carId); if (c) recs.push(grip(c.tyre) < 25 ? 'Box: grip is nearly gone' : grip(c.tyre) > 50 && race.wetness < 0.15 ? 'Tyres still have life — staying out 2 laps is an option' : 'Box as proposed'); }
   if (p.type === 'pitplan') { const c = carById(race, p.carId); if (c) recs.push(grip(c.tyre) > 45 ? 'Tyres still have life — extending 2 laps is an option' : grip(c.tyre) < 25 ? 'Box now: grip is nearly gone' : 'Stick to the plan'); }
   if (p.type === 'red') recs.push('Free tyre change: fit the tyre that can reach the flag (Hards if >25 laps left)');
   if (p.type === 'cliff') recs.push('Box within 1–2 laps or lose ~1s+/lap');
@@ -112,7 +113,7 @@ export function raceDataHtml(race) {
 }
 function showDecision(race, p) {
   const mine = race.cars.filter((c) => c.isPlayer && !c.dnf && !c.finished);
-  const titles = { pitplan: '🛞 Planned pit stop', red: '🟥 Red flag', vsc: '🟡 Virtual Safety Car', sc: '🟡 Safety Car', rain: '🌧️ Rain', dry: '☀️ Track drying', cliff: '⚠️ Tyre cliff', failure: '🔧 Technical problem', damage: '💥 Damage', orders: '📻 Team orders', plan: '📋 Strategy check', fuel: '⛽ Fuel' };
+  const titles = { pitconfirm: '🛞 Pit stop — your call', pitplan: '🛞 Planned pit stop', red: '🟥 Red flag', vsc: '🟡 Virtual Safety Car', sc: '🟡 Safety Car', rain: '🌧️ Rain', dry: '☀️ Track drying', cliff: '⚠️ Tyre cliff', failure: '🔧 Technical problem', damage: '💥 Damage', orders: '📻 Team orders', plan: '📋 Strategy check', fuel: '⛽ Fuel' };
   const car = p.carId ? carById(race, p.carId) : null;
   let body = '';
   if (['sc', 'vsc', 'red', 'rain', 'dry'].includes(p.type)) body = mine.map((c) => tyreRow(race, c)).join('');
@@ -126,10 +127,39 @@ function showDecision(race, p) {
   if (p.type === 'pitplan' && car) { const st = car.plan.stops[car.planIdx]; body = `<div class="carpanel"><div class="small">Grip ${grip(car.tyre)}% after ${car.tyre.age} laps · P${car.pos} · plan: box L${st?.lap} → ${st ? tyreBadge(st.c) : ''}</div>
     <div class="tiny muted" style="margin-top:.4rem">Keep the plan, but choose the tyre:</div><div class="row">${['S', 'M', 'H', 'I', 'W'].map((x) => `<button class="btn sm ${st?.c === x ? 'on' : ''}" data-act="dstop" data-arg="${car.id}:${x}">Box → ${tyreBadge(x)}</button>`).join('')}</div>
     <div class="row" style="margin-top:.4rem"><button class="btn sm" data-act="ddelay" data-arg="${car.id}:2">Stay out +2 laps</button><button class="btn sm" data-act="ddelay" data-arg="${car.id}:5">Stay out +5 laps</button><button class="btn sm" data-act="dplan" data-arg="${car.id}:manual">Cancel plan — I'll call it</button></div></div>`; }
+  if (p.type === 'pitconfirm' && car) body = pitConfirmBody(race, car);
   if (p.type === 'orders') body = `<div class="opts"><button class="btn" data-act="dorders" data-arg="${p.carId}:${p.mateId}:swap"><b>Swap positions</b>&nbsp;<span class="muted small">Faster car through; morale hit for the other driver.</span></button><button class="btn" data-act="dorders" data-arg="${p.carId}:${p.mateId}:hold"><b>Hold positions</b>&nbsp;<span class="muted small">No risk of contact; frustrated faster driver.</span></button><button class="btn" data-act="dorders" data-arg="${p.carId}:${p.mateId}:race"><b>Let them race</b>&nbsp;<span class="muted small">Fair, but risk of contact and time loss.</span></button></div>`;
   modal(`<div class="decision" style="padding:.2rem;border:0"><h2>${titles[p.type] || 'Decision'} <span class="muted small">Lap ${race.lap}/${race.laps}</span></h2><p>${esc(p.text)}</p>${recommendation(race, p)}${body}<details class="rdata"><summary>📊 Full race data (all cars, weather)</summary>${raceDataHtml(race)}</details><div class="row" style="justify-content:flex-end;margin-top:1rem"><button class="btn" data-act="dpeek">👁 View race screen (stays paused)</button><button class="btn primary" data-act="dclose">Resume race ▶</button></div></div>`, { wide: true, dismiss: false });
 }
+function pitConfirmBody(race, c) {
+  const want = c._ask?.c || 'M'; const sets = Array.isArray(c.sets) ? c.sets : null;
+  const comps = race.wetness > 0.15 ? ['I', 'W', 'S', 'M', 'H'] : ['S', 'M', 'H', 'I', 'W'];
+  const rows = comps.map((x) => {
+    const mine = sets ? sets.filter((s) => s.c === x).sort((a, b) => a.wear - b.wear) : null;
+    const opts = mine ? (mine.length ? mine.map((s) => `<button class="btn sm ${x === want && s === mine[0] ? 'on' : ''}" data-act="pcbox" data-arg="${c.id}:${x}:${s.id}">${s.wear < 1 ? '🆕 New' : `Used · ${Math.round(100 - s.wear)}% grip`}</button>`).join('') : `<button class="btn sm" data-act="pcbox" data-arg="${c.id}:${x}:">No sets left — scrubbed spare (65%)</button>`)
+      : `<button class="btn sm ${x === want ? 'on' : ''}" data-act="pcbox" data-arg="${c.id}:${x}:">Fresh set</button>`;
+    const nNew = mine ? mine.filter((s) => s.wear < 1).length : null;
+    return `<div class="pcrow ${x === want ? 'rec' : ''}"><span class="pcc">${tyreBadge(x)} <b>${COMPOUNDS[x].name}</b>${mine ? `<span class="tiny muted">${nNew} new · ${mine.length - nNew} used</span>` : ''}${x === want ? '<span class="pill ok tiny">engineer pick</span>' : ''}</span><span class="pcsets">${opts}</span></div>`;
+  }).join('');
+  return `<div class="carpanel"><div class="hd"><span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b><span class="pill">P${c.pos}</span><span class="pill">${tyreBadge(c.tyre.c)} ${grip(c.tyre)}% grip · ${c.tyre.age} laps</span></div>
+  ${c.damage > 0 ? `<label class="small" style="display:block;margin:.4rem 0"><input type="checkbox" id="pcrep" checked> Repair damage too (+~6s, removes +${c.damage.toFixed(1)}s/lap)</label>` : ''}
+  <div class="tiny muted" style="margin:.4rem 0 .2rem">Pick the set to fit (grip % = life left; 100% = brand new):</div><div class="pcgrid">${rows}</div>
+  <div class="row" style="margin-top:.6rem"><button class="btn sm" data-act="pcstay" data-arg="${c.id}:2">Stay out — ask again in 2 laps</button><button class="btn sm" data-act="pcstay" data-arg="${c.id}:5">Stay out 5 laps</button><button class="btn sm ghost" data-act="pcdrop" data-arg="${c.id}">Skip this planned stop</button></div></div>`;
+}
+function wxWidget(race) {
+  const w = race.weather?.wet || []; const now = race.wetness || 0; const l = Math.min(w.length - 1, race.lap + 5); const soon = w[l] ?? now;
+  const ic = now > 0.6 ? 'storm' : now > 0.15 ? 'rain' : soon > 0.2 ? 'cloud' : 'sun';
+  const svg = { sun: '<svg viewBox="0 0 24 24" class="wxi sun"><g class="rays" stroke="#ffd34d" stroke-width="2" stroke-linecap="round">' + [0, 45, 90, 135, 180, 225, 270, 315].map((a) => `<line x1="12" y1="2.5" x2="12" y2="5" transform="rotate(${a} 12 12)"/>`).join('') + '</g><circle cx="12" cy="12" r="4.6" fill="#ffd34d"/></svg>',
+    cloud: '<svg viewBox="0 0 24 24" class="wxi cloud"><circle cx="8" cy="9" r="3.5" fill="#ffd34d"/><path class="cl" d="M6 18h11a3.5 3.5 0 0 0 0-7 5 5 0 0 0-9.6 1.4A3 3 0 0 0 6 18z" fill="#c9d2e3"/></svg>',
+    rain: '<svg viewBox="0 0 24 24" class="wxi rain"><path d="M5 13h12a3.5 3.5 0 0 0 0-7 5 5 0 0 0-9.6 1.4A3 3 0 0 0 5 13z" fill="#9fb0cc"/><g class="drops" stroke="#4aa8ff" stroke-width="1.6" stroke-linecap="round"><line x1="8" y1="15" x2="7" y2="18"/><line x1="12" y1="15" x2="11" y2="18"/><line x1="16" y1="15" x2="15" y2="18"/></g></svg>',
+    storm: '<svg viewBox="0 0 24 24" class="wxi rain"><path d="M5 12h12a3.5 3.5 0 0 0 0-7 5 5 0 0 0-9.6 1.4A3 3 0 0 0 5 12z" fill="#6f7f9c"/><g class="drops" stroke="#4aa8ff" stroke-width="1.6" stroke-linecap="round"><line x1="7" y1="14" x2="6" y2="18"/><line x1="10" y1="14" x2="9" y2="18"/><line x1="16" y1="14" x2="15" y2="18"/></g><path d="M13 13l-2 4h2l-1 4 3-5h-2l1-3z" fill="#ffd34d"/></svg>' }[ic];
+  const trend = soon > now + 0.08 ? '↗ rain coming' : soon < now - 0.08 ? '↘ drying' : '→ stable';
+  return `<span class="wxw" title="Track wetness now ${Math.round(now * 100)}%, in 5 laps ${Math.round(soon * 100)}%">${svg}<span class="tiny"><b>${race.trackTemp}°C</b> · ${Math.round(now * 100)}% wet <span class="muted">${trend}</span></span></span>`;
+}
 on({
+  pcbox: (arg) => { const [id, x, sid] = arg.split(':'); const rep = document.getElementById('pcrep'); actions.confirmPit(R(), id, x, sid || null, rep ? rep.checked : false); closeModal(); },
+  pcstay: (arg) => { const [id, n] = arg.split(':'); actions.declinePit(R(), id, +n); closeModal(); },
+  pcdrop: (id) => { actions.declinePit(R(), id, 4, true); closeModal(); },
   dpit: (arg, el) => { const [id, c] = arg.split(':'); actions.pit(R(), id, c); el.parentElement.querySelectorAll('.btn').forEach((b) => b.classList.remove('on')); el.classList.add('on'); },
   dstay: (id, el) => { actions.cancelPit(R(), id); el.parentElement.querySelectorAll('.btn').forEach((b) => b.classList.remove('on')); el.classList.add('on'); },
   dmode: (arg, el) => { const [id, m] = arg.split(':'); actions.mode(R(), id, m); el.classList.add('on'); },
@@ -156,7 +186,7 @@ function drawMap(race, len, trk) {
     if (inPit) placeCarAt(c.id, pitPoint(trk.pts, entering ? (d - 0.955) / 0.09 : (d + 0.045) / 0.09)); else placeCar(trk.pts, c.id, d);
     if (c.id === sel || c.id === selB) {
       const k = race.sc.state === 'sc' ? 1.45 : race.sc.state === 'vsc' ? 1.3 : 1;
-      const drs = drsOn(race) && (app._iv?.[c.id] ?? 9) < 1;
+      const drs = drsOn(race) && race.wetness < 0.3;
       const cap = race.sc.state === 'sc' ? 175 : race.sc.state === 'vsc' ? 215 : null;
       updateTele(trk.t, c.id === sel ? 'rtele' : 'rtele2', `<span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b> <span class="muted">P${c.pos} · L${Math.min(c.lapsDone + 1, race.laps)}${inPit ? ' · PIT LANE' : ''}${cap ? ` · <b style="color:#ffd400">${race.sc.state === 'sc' ? 'SC — no overtaking, DRS off' : 'VSC — delta speed, DRS off'}</b>` : ''}</span>`, f, { k, state: c.finished ? 'garage' : inPit ? 'pit' : 'track', drs, cap, follow: !!c.dirty });
     }
@@ -180,7 +210,7 @@ function drawBar(race, st) {
   const el = document.getElementById('racebar'); if (!el) return;
   const flag = race.finished ? '<span class="flag chk">🏁 FINISHED</span>' : race.red > 0 ? '<span class="flag red">RED FLAG</span>' : race.sc.state === 'sc' ? '<span class="flag sc">SAFETY CAR</span>' : race.sc.state === 'vsc' ? '<span class="flag vsc">VSC</span>' : '<span class="flag green">GREEN</span>'; const yl = race.yellow && !race.finished ? `<span class="flag vsc">YELLOW S${race.yellow.sector}</span>` : '';
   const sp = app.settings.speed;
-  const html = `<span class="lap mono">L${Math.min(race.lap, race.laps)}/${race.laps}</span>${flag}${yl}<span class="flag ${drsOn(race) ? 'drs-on' : 'drs-off'}">DRS ${drsOn(race) ? 'ENABLED' : 'DISABLED'}</span><span class="small">${wetLabel(race.wetness)}${race.wetness > 0.05 ? ` (${Math.round(race.wetness * 100)}%)` : ''}</span>
+  const html = `<span class="lap mono">L${Math.min(race.lap, race.laps)}/${race.laps}</span>${flag}${yl}<span class="flag ${drsOn(race) && race.wetness < 0.3 ? 'drs-on' : 'drs-off'}" title="2026 active aero: every car may open its wings (X-mode) in the green zones on the map, every lap. Disabled in the wet and under SC.">ACTIVE AERO ${drsOn(race) && race.wetness < 0.3 ? 'X-MODE ON' : 'LOCKED (Z)'}</span>${wxWidget(race)}<span class="small">${wetLabel(race.wetness)}${race.wetness > 0.05 ? ` (${Math.round(race.wetness * 100)}%)` : ''}</span>
   <span class="sp"></span>
   ${race.finished ? `<button class="btn primary" data-act="toDebrief">Race debrief →</button>` : `<div class="row speed" role="group" aria-label="Simulation speed"><button class="btn sm ${st?.running ? '' : 'on'}" data-tap="rpause" aria-label="Pause">${st?.running ? '⏸' : '▶'}</button>
   ${Object.entries({ normal: '1×', fast: '3×', vfast: '9×' }).map(([k, l]) => `<button class="btn sm ${sp === k ? 'on' : ''}" data-tap="rspeed" data-arg="${k}">${l}</button>`).join('')}<button class="btn sm ghost" data-act="rskip" title="Let the engineers run the rest">⏭</button></div>`}`;
@@ -194,7 +224,7 @@ function watchPits(race) {
   for (const c of race.cars) {
     const n = c.stops.length, seen = race._seenStops[c.id] ?? n;
     if (race._seenStops[c.id] == null) { race._seenStops[c.id] = n; continue; }
-    for (let i = seen; i < n; i++) if (c.isPlayer || c.pos <= 10 || pitQ.length < 3) pitQ.push({ c, st: c.stops[i] });
+    for (let i = seen; i < n; i++) if (c.isPlayer) pitQ.push({ c, st: c.stops[i] });
     race._seenStops[c.id] = n;
   }
   pitQ.sort((a, b) => (b.c.isPlayer ? 1 : 0) - (a.c.isPlayer ? 1 : 0));
@@ -213,6 +243,7 @@ function playPit({ c, st }) {
   setTimeout(() => { el.classList.remove('show'); setTimeout(() => { pitBusy = false; if (pitQ.length) playPit(pitQ.shift()); }, 350); }, dur + (c.isPlayer ? 2200 : 1300));
 }
 function drawUI(race) {
+  if (race.askPits == null) race.askPits = true;
   watchPits(race);
   const s = app.state; const order = updateOrder(race);
   drawBar(race, app._raceSt);
@@ -248,7 +279,7 @@ function carPanel(race, c, order, info) {
   <div class="row small" style="margin-top:.3rem">${tyreBadge(c.tyre.c)} <span>${COMPOUNDS[c.tyre.c].name} · ${c.tyre.age} laps · grip ${wear}${c.sets ? ` · sets left: ${['S','M','H','I','W'].map((x) => { const n = c.sets.filter((y) => y.c === x).length; return n ? x + n : ''; }).filter(Boolean).join(' ')}` : ''}${c.dirty ? ' · <span class="warn">dirty air</span>' : ''}</span></div>${bar(100 - c.tyre.wear, 100, c.tyre.wear > cliff ? 'var(--bad)' : c.tyre.wear > cliff - 12 ? 'var(--warn)' : 'var(--good)')}
   <div class="row tiny muted" style="margin-top:.2rem"><span>Fuel ${fuelMargin >= 0 ? '+' : ''}${(fuelMargin / (100 / race.laps)).toFixed(1)} laps</span><span>Battery ${Math.round(c.battery)}%</span><span>${next ? `Plan: L${next.lap} → ${next.c}` : 'No more planned stops'}</span></div>
   <div class="tiny muted" style="margin-top:.35rem">Driving mode</div><div class="seg">${MODES.map((m) => `<button class="btn sm ${c.mode === m ? 'on' : ''}" data-act="rmode" data-arg="${c.id}:${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}</div>
-  <div class="tiny muted">ERS</div><div class="seg">${ERS_MODES.map((m) => `<button class="btn sm ${c.ers === m ? 'on' : ''}" data-act="rers" data-arg="${c.id}:${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}</div>
+  <div class="tiny muted">Overtake mode <span title="2026 rules: extra electric power only when within 1.0s of the car ahead (never for the leader). Battery recharges itself under braking and clipping.">ⓘ</span> ${c.ovt ? '<b class="ok">⚡ ACTIVE</b>' : c.pos === 1 ? '<span class="muted">leader — not available</span>' : '<span class="muted">needs &lt;1.0s gap</span>'}</div><div class="seg">${ERS_MODES.map((m) => `<button class="btn sm ${c.ers === m ? 'on' : ''}" data-act="rers" data-arg="${c.id}:${m}">${m === 'auto' ? 'Use when in range' : 'Save battery'}</button>`).join('')}</div>
   <div class="tiny muted">Pit call ${c.pitReq ? `<b class="warn">— BOXING for ${COMPOUNDS[c.pitReq.c].name}</b>` : ''}</div><div class="seg">${['S', 'M', 'H', 'I', 'W'].map((x) => `<button class="btn sm ${c.pitReq?.c === x ? 'on' : ''}" data-act="rpit" data-arg="${c.id}:${x}" title="Box for ${COMPOUNDS[x].name}">${tyreBadge(x)}</button>`).join('')}${c.pitReq ? `<button class="btn sm danger" data-act="rcancel" data-arg="${c.id}">Cancel</button>` : ''}</div>
   <label class="tiny" style="margin-top:.3rem"><input type="checkbox" ${c.autoPlan ? 'checked' : ''} data-change="rauto" data-arg="${c.id}"> Engineers execute plan & weather calls</label></div>`;
 }
@@ -264,7 +295,7 @@ on({
   rskip: async () => {
     const ok = await confirmBox('Simulate to the flag?', 'Engineers will run the rest of the race using your plan. Critical decisions will be made automatically.', 'Simulate');
     if (!ok) return; const race = R(); const t = trackById(app.state.weekend.trackId);
-    for (const c of race.cars) if (c.isPlayer) c.autoPlan = true;
+    for (const c of race.cars) if (c.isPlayer) c.autoPlan = true; race.askPits = false;
     let T = race.viewTime; let g = 0; while (!race.finished && g++ < 20000) { T += 30; advance(race, T, t, {}); }
     race.pending.forEach((p) => (p.shown = true)); race.viewTime = race.time; onFinish();
   },

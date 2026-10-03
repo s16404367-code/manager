@@ -1,5 +1,5 @@
 // Offline cache (network-first for freshness, cache fallback for offline play).
-const CACHE = 'tp3-v38';
+const CACHE = 'tp-r10';
 self.addEventListener('install', (e) => { self.skipWaiting(); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k))))); self.clients.claim(); });
 self.addEventListener('fetch', (e) => {

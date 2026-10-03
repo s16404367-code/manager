@@ -1,9 +1,10 @@
 // Power-unit & gearbox component pool per car (career + quick). Wear raises failure risk; exceeding the
 // season allocation earns grid penalties (10 places for the first extra element of a type, 5 after).
 import { clamp } from '../sim/util.js';
-export const COMP = { ICE: { name: 'Engine (ICE)', life: 16 }, TC: { name: 'Turbocharger', life: 15 }, ERS: { name: 'ERS / battery', life: 17 }, GB: { name: 'Gearbox', life: 11 } };
+export const COMP = { ICE: { name: 'Engine (ICE)', life: 16 }, TC: { name: 'Turbocharger', life: 15 }, ERS: { name: 'MGU-K / battery', life: 17 }, GB: { name: 'Gearbox', life: 11 } };
 export const COMP_KEYS = Object.keys(COMP);
-export function allowance(state, key) { const n = state.calendar?.length || 12; return key === 'GB' ? Math.max(2, Math.ceil(n / 4)) : Math.max(2, Math.ceil(n / 6)); }
+// 2026 pool per driver (same for every team): 4 ICE, 4 turbo, 3 MGU-K/ES over 24 races → scaled to season length
+export function allowance(state, key) { const n = state.calendar?.length || 12; return key === 'GB' ? Math.max(2, Math.ceil(n / 4)) : key === 'ERS' ? Math.max(2, Math.ceil(n / 8)) : Math.max(2, Math.ceil(n / 6)); }
 export function ensurePC(team) {
   if (!Array.isArray(team.pc) || team.pc.length !== 2) team.pc = [0, 1].map(() => Object.fromEntries(COMP_KEYS.map((k) => [k, { wear: 0, used: 1, pens: 0 }])));
   return team.pc;

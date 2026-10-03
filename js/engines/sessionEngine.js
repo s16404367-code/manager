@@ -4,14 +4,14 @@
 import { RNG } from '../sim/rng.js';
 import { clamp } from '../sim/util.js';
 import { trackById, lapProfile } from '../data/tracks.js';
-import { effectiveCar, trackScore, carDeficitSec, setupQuality, setupEffects } from './carModel.js';
+import { effectiveCar, trackScore, carDeficitSec, setupQuality, setupEffects, DRIVER_W } from './carModel.js';
 import { COMPOUNDS, wetPenalty, tyrePaceLoss, wearPerLap, bestFor } from './tyreEngine.js';
 import { lapProfile as lapProf } from '../data/tracks.js';
 import { aiSetupQ, applyProgram, commitQuali, PRACTICE_PROGRAMS, gainKnow, knowOf, AI_KNOW } from './weekendEngine.js';
 import { maxWear, ensurePC, COMP } from './components.js';
 
 export const Q_LEN = [720, 600, 480];
-export const FP_LEN = 1800; // 30 min of session clock per practice session (compressed)
+export const FP_LEN = 3600; // 60 min per practice session (FP1-FP3)
 export const SETUP_CHANGE_S = 30;
 const OUT_K = 1.35, IN_K = 1.3, COOL_K = 1.18;
 
@@ -22,7 +22,7 @@ function carBase(state, did, wet, tyre) {
   const rng = new RNG((wk.seed ^ (did.length * 7919 + slot * 31 + d.name.charCodeAt(0))) >>> 0);
   const sq = team.isPlayer ? setupQuality(wk.setups[did], wk.opt[did]) : aiSetupQ(team, rng);
   const fx = team.isPlayer ? setupEffects(wk.setups[did], wk.opt[did], t) : { topSpeed: 0, mistakeMult: 1 };
-  const lt = t.baseLap - (knowOf(state, did) - AI_KNOW) * 0.3 + perf + (100 - d.pace) * 0.035 + (1 - sq) * 0.9 - (wk.qualiPrep[did] || 0) + wetPenalty(tyre, wet) + wet * 6 + wet * (100 - d.wet) * 0.04 - fx.topSpeed * t.drag * 2 + 0.16 - 0.45;
+  const lt = t.baseLap - (knowOf(state, did) - AI_KNOW) * 0.3 + perf + (100 - d.pace) * DRIVER_W + (1 - sq) * 0.9 - (wk.qualiPrep[did] || 0) + wetPenalty(tyre, wet) + wet * 6 + wet * (100 - d.wet) * 0.04 - fx.topSpeed * t.drag * 2 + 0.16 - 0.45;
   return { lt, sq, fx };
 }
 
@@ -74,7 +74,7 @@ function startLap(state, sess, c, kind) {
   const d = state.drivers[c.did];
   const { lt, fx } = carBase(state, c.did, sess.wet, c.tyre);
   const evo = t.evo * 0.55 * (sess.clock / sess.len) + (sess.kind === 'quali' ? sess.idx * t.evo * 0.12 : 0);
-  const fuel = sess.kind === 'practice' ? (c.prog === 'longrun' ? 1.6 : c.prog === 'qualisim' ? 0.1 : 0.8) : 0;
+  const fuel = sess.kind === 'practice' ? (c.prog === 'longrun' ? 1.6 : c.prog === 'aero' ? 0.5 : 0.8) : 0;
   const set = setOf(state, c); const wearNow = set ? set.wear : c.aiWear;
   const tyreAge = tyrePaceLoss({ c: c.tyre, wear: wearNow, age: set ? set.laps : c.runPush + 1 }, sess.trackTemp) + (kind === 'push' && wearNow < 3 && sess.kind === 'quali' ? -0.12 : 0);
   const pushK = sess.kind === 'quali' ? { safe: 0.08, normal: 0, max: -0.12 }[c.push] : 0.25;
@@ -153,7 +153,7 @@ function toGarage(state, sess, c, lines, chequered = false) {
   c.st = sess.clock >= sess.len ? 'done' : 'garage'; c.cur = null;
   if (sess.kind === 'practice' && c.isPlayer && c.runPush > 0) {
     const rng = rngOf(sess);
-    const out = applyProgram(state, c.did, c.prog, rng, clamp(c.runPush / 12, 0.1, 0.8));
+    const out = applyProgram(state, c.did, c.prog, rng, clamp(c.runPush / 12, 0.1, 0.8) * 0.6);
     out.forEach((l) => { lines.push(l); sess.log.push({ t: sess.clock, text: '🔧 ' + l.text, sev: 'info', pl: true }); });
   }
   c.runPush = 0; c.runs++;

@@ -1,4 +1,4 @@
-# Team Principal V3 — Motorsport Management & Strategy Simulator
+# Team Principal — Motorsport Management & Strategy Simulator
 
 An F1-inspired **Team Principal** simulator. It runs entirely in the browser as a static site. There's no backend, login or build step, and it plays offline. You don't drive the car: you run the factory, the engineers, the drivers, development, the finances and the pit wall.
 
@@ -53,7 +53,7 @@ See `docs/` for the architecture, game design notes and the QA checklist.
 
 ### Run in GitHub Codespaces
 ```bash
-unzip team-principal-v3.1.zip -d . && cd f1tp   # if you uploaded the zip
+unzip team-principal.zip -d . && cd f1tp   # if you uploaded the zip
 python3 -m http.server 8080                      # then open the forwarded port 8080 (Ports tab → globe icon)
 node tests/run-tests.mjs                          # headless engine tests
 ```
@@ -82,3 +82,6 @@ node tests/run-tests.mjs                          # headless engine tests
 - Safety car realism: SC ~175 km/h and VSC delta speed in telemetry, no overtaking, DRS disabled during SC/VSC and for 2 laps after the restart, and a DRS ENABLED/DISABLED indicator on the race bar.
 - Map size capped (max 560px wide, ~half the screen height), the same in practice, qualifying and the race.
 - New weather-day cards, pulsing SC flag, and restyled car panels.
+
+## Round 10
+See CHANGELOG.md (latest section).

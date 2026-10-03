@@ -12,7 +12,7 @@ function cellsByMonth(s) {
   for (let w = 1; w <= YEAR_WEEKS; w++) {
     const m = weekDate(sc.year, w).getUTCMonth(); const ri = sc.weeks.indexOf(w);
     const t = ri >= 0 ? trackById(s.calendar[ri]) : null;
-    const kind = ri >= 0 ? (ri < s.round ? 'race done' : ri === s.round ? 'race next' : 'race') : w === sc.testing ? 'test' : w === sc.devOpen ? 'dev' : w === sc.start ? 'st' : w === sc.end ? 'end' : '';
+    const kind = ri >= 0 ? (ri < s.round ? 'race done' : ri === s.round ? 'race next' : 'race') : (w === sc.testing || Object.values(C.testWeeks(s)).includes(w)) ? 'test' : w === sc.devOpen ? 'dev' : w === sc.start ? 'st' : w === sc.end ? 'end' : '';
     out[Math.min(11, m)].push({ w, kind, t, ri, past: w < s.week, now: w === s.week });
   }
   return out;
@@ -31,10 +31,37 @@ export function yearStrip(s, compact = false) {
 }
 
 export function yearPlanList(s) {
-  ensureSchedule(s); const sc = s.schedule; const d = (w) => fmtDate(weekDate(sc.year, w));
-  return `<ul class="small yplan"><li><b>${d(sc.start)}</b> — factory reopens, budget released (week ${sc.start})</li><li><b>${d(sc.devOpen)}</b> — upgrade projects can start (week ${sc.devOpen})</li><li><b>${d(sc.testing)}</b> — pre-season testing (week ${sc.testing})</li><li><b>${d(sc.first)} → ${d(sc.last)}</b> — ${s.calendar.length} races (weeks ${sc.first}–${sc.last})</li><li><b>${d(sc.end)}</b> — year closes, season review (week ${sc.end})</li></ul><p class="tiny muted">Dates of the races are fixed. What happens in the weeks between (offers, failures, staff news, events) is not.</p>`;
+  ensureSchedule(s); const sc = s.schedule; const d = (w) => fmtDate(weekDate(sc.year, w)); const tw = C.testWeeks(s);
+  const n = s.calendar.length; const voteRound = Math.floor(n / 2); const voteWeek = sc.weeks[voteRound] || sc.last;
+  const ms = [
+    [sc.start, '🏁', 'Factory reopens', 'Season budget released'],
+    [sc.devOpen, '✏️', 'Development opens', 'Upgrade projects can start'],
+    [tw.pre, '🧪', 'Pre-season test', '3 days · car & driver knowledge'],
+    [sc.first, '🚦', `Race 1 — ${trackById(s.calendar[0])?.name || ''}`, `${n} races to ${d(sc.last)}`],
+    ...(tw.mid ? [[tw.mid, '🧪', 'In-season test', '2 days · measure upgrades']] : []),
+    [voteWeek, '🗳️', 'Rules vote', s.regulation?.vote ? (s.regulation.vote.passed ? 'Passed — new rules next year' : 'Rejected') : 'F1 Commission votes on next year'],
+    [sc.last, '🏆', `Final race — ${trackById(s.calendar[n - 1])?.name || ''}`, 'Constructors\' bonus paid at year end'],
+    [tw.post, '🧪', 'Post-season test', 'Track time by standings'],
+    [sc.end, '📊', 'Year closes', 'Season review, cash carries over'],
+  ].sort((x, y) => x[0] - y[0]);
+  const nextI = ms.findIndex((m) => m[0] >= s.week);
+  return `<div class="ytl">${ms.map(([w, ic, h, sub], i) => `<div class="ytli ${w < s.week ? 'done' : i === nextI ? 'next' : ''}"><span class="ytld">${w < s.week ? '✓' : ic}</span><div><b>${esc(h)}</b><small>${d(w)} · wk ${w}${i === nextI && w > s.week ? ` · in ${w - s.week} wk` : i === nextI ? ' · this week' : ''}</small><small class="muted">${esc(sub)}</small></div></div>`).join('')}</div>`;
 }
 
+// "What happens when you press Next week" — a live mini-dashboard instead of a text tip
+function thisWeek(s) {
+  const P = s.teams[s.player]; const act = s.projects.filter((p) => ['design', 'manufacturing'].includes(p.stage));
+  const soon = act.length ? Math.min(...act.map((p) => p.weeksLeft + (p.stage === 'design' ? p.mfgWeeks || 0 : 0))) : null;
+  const fat = Math.round(Object.values(P.depts).reduce((a, d) => a + d.fatigue, 0) / Object.keys(P.depts).length);
+  const tw = C.testWeeks(s); const nextTest = Object.entries(tw).filter(([k, w]) => w >= s.week && !(s.testsDone || {})[k + s.season]).sort((a, b) => a[1] - b[1])[0];
+  const items = [
+    ['🔧', act.length ? `${act.length} part${act.length > 1 ? 's' : ''} in progress` : 'No parts in progress', act.length ? `next on the car in ~${soon} wk` : 'start one in Car & Dev', act.length ? '' : 'warn', 'car'],
+    ['🏗️', P.facilityBuilds.length ? `${P.facilityBuilds.length} build${P.facilityBuilds.length > 1 ? 's' : ''}` : 'Facilities idle', P.facilityBuilds.length ? `${Math.min(...P.facilityBuilds.map((b) => b.weeksLeft))} wk left` : 'upgrade in Facilities', '', 'facilities'],
+    ['😓', `Fatigue ${fat}`, fat > 55 ? 'staff need a break' : 'staff OK', fat > 55 ? 'warn' : '', 'staff'],
+    ['🧪', nextTest ? ({ pre: 'Pre-season test', mid: 'In-season test', post: 'Post-season test' })[nextTest[0]] : 'No more tests', nextTest ? (nextTest[1] === s.week ? 'this week' : `in ${nextTest[1] - s.week} wk`) : 'this year', '', 'hq'],
+  ];
+  return `<div class="twk"><div class="tiny muted twkh">PRESSING “NEXT WEEK” MOVES THESE ON · it stops early if a decision is needed</div><div class="twkg">${items.map(([ic, a, b, k, r]) => `<a class="twi ${k}" href="#/${r}"><span class="twic">${ic}</span><span><b>${a}</b><small>${b}</small></span></a>`).join('')}</div></div>`;
+}
 export function clockCard(s) {
   ensureSchedule(s); const sc = s.schedule; const ph = phaseOf(s);
   const n = weeksToRace(s); const tr = s.calendar[s.round] ? trackById(s.calendar[s.round]) : null;
@@ -54,7 +81,7 @@ export function clockCard(s) {
   ${s.week < sc.devOpen ? `<div class="tiny warn">Development opens in week ${sc.devOpen}</div>` : ''}</div>${cd}</div>
   ${yearStrip(s, true)}
   <div class="row" style="margin-top:.6rem">${btns}</div>
-  <div class="tiny muted" style="margin-top:.3rem">Each week: projects progress, fatigue changes, and offers or problems may appear. Advancing stops early when a decision is needed.</div></div>`;
+  ${thisWeek(s)}</div>`;
 }
 
 on({

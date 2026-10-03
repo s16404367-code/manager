@@ -1,6 +1,19 @@
 // Race weekend: preparation, practice, qualifying, strategy lab.
-import { app, screen, on, go, esc, persist, toast, render, modal, closeModal } from './app.js';
-import { trackById, trackPath, TRACKS, kmLen, MONTH_NAME } from '../data/tracks.js';
+import { app, screen, on, go, esc, persist, toast, render, modal, closeModal, updateSettings } from './app.js';
+import { trackById, trackPath, TRACKS, kmLen, MONTH_NAME, lapProfile } from '../data/tracks.js';
+function planBar(plan, laps, wet, est, mini = false) {
+  const marks = [0, ...plan.stops.map((x) => x.lap), laps]; const comps = [plan.start, ...plan.stops.map((x) => x.c)]; const pc = (l) => (l / laps) * 100;
+  const rain = wet ? wet.slice(0, laps).map((w, i) => (w > 0.15 ? `<i class="pbrain" style="left:${pc(i)}%;width:${pc(1)}%;opacity:${Math.min(0.9, w)}"></i>` : '')).join('') : '';
+  const segs = comps.map((c, i) => { const n = marks[i + 1] - marks[i]; const life = est ? est(c) : null; const over = life && n > life + 2;
+    return `<div class="pbseg ${over ? 'over' : ''}" style="left:calc(${pc(marks[i])}% + ${i ? 2 : 0}px);width:calc(${pc(n)}% - ${i ? 2 : 0}px);--tc:${COMPOUNDS[c].color}" title="${COMPOUNDS[c].name}: laps ${marks[i] + 1}–${marks[i + 1]} (${n} laps${life ? `, life ~${life}` : ''})">${mini ? '' : `<span>${c} <small>${n}L</small></span>`}${life && !mini ? `<em style="width:${Math.min(100, (life / n) * 100)}%"></em>` : ''}</div>`; }).join('');
+  const ticks = mini ? '' : plan.stops.map((x) => `<span class="pbtick" style="left:${pc(x.lap)}%">L${x.lap}</span>`).join('');
+  return `<div class="planbar ${mini ? 'mini' : ''}">${rain}${segs}${ticks}</div>${mini ? '' : '<div class="tiny muted pblegend">Shaded line inside a stint = estimated tyre life · red outline = stint longer than the tyre lasts · blue = forecast rain</div>'}`;
+}
+function setsLine(wk, did) {
+  const sets = wk.sets?.[did]; if (!sets) return '—';
+  return ['S', 'M', 'H', 'I', 'W'].map((c) => { const l = sets.filter((x) => x.c === c); if (!l.length) return ''; const nw = l.filter((x) => x.laps === 0).length; const used = l.filter((x) => x.laps > 0); return `<span class="pill">${tyreBadge(c)} ${nw} new${used.length ? ` · ${used.map((u) => Math.round(100 - u.wear) + '%').join('/')}` : ''}</span>`; }).join(' ');
+}
+const trackAeroCount = (t) => { const z = lapProfile(t).aeroZones || []; return `${z.length} zone${z.length === 1 ? '' : 's'} (green on the map)`; };
 import { createSession, commitSession } from '../engines/sessionEngine.js';
 import { mapSvg } from './trackView.js';
 import { ATTR_LABEL } from '../data/teams.js';
@@ -139,7 +152,7 @@ function prepView(s, wk, t) {
   return `<div class="grid g2">
   <div class="card"><h3>Circuit profile</h3><div class="row" style="align-items:flex-start"><div style="width:190px;flex:none">${mapSvg(t, 'pmap')}<div class="tiny muted" style="text-align:center">${kmLen(t)} km · ${t.laps} laps (full)</div></div>
     <div class="grid" style="grid-template-columns:1fr 1fr;gap:.3rem .8rem;flex:1">${dem.map(([l, v]) => `<div class="small">${l}${bar(v * 100, 100, v > 0.75 ? 'var(--accent2)' : null)}</div>`).join('')}</div></div>
-    <p class="small muted">Pit-lane loss ≈ ${t.pit}s · Track evolution ${Math.round(t.evo * 100)}% · DRS effect ${Math.round(t.drs * 100)}%</p></div>
+    <p class="small muted">Pit-lane loss ≈ ${t.pit}s · Track evolution ${Math.round(t.evo * 100)}% · Active-aero straights ${trackAeroCount(t)}</p></div>
   <div class="card"><h3>Car suitability ${helpBtn('suitability')}</h3>
     <p>Engineers estimate our pace rank here: <b>P${clamp(rank - unc, 1, 10)}–P${clamp(rank + unc, 1, 10)}</b> of 10 teams.</p>
     <div class="small">Cornering (weighted) ${bar(b.corner, 110)}Straight-line ${bar(b.straight, 110)}Mechanical/traction ${bar(b.mech, 110)}Braking ${bar(b.braking, 110)}</div>
@@ -172,11 +185,11 @@ function practiceView(s, wk, t) {
 on({
   prog: (arg) => { const [did, k] = arg.split(':'); app.tab.prog[did] = k; render(); },
   runPractice: () => { // quick-simulate through the real session engine so lap data (runLog) is recorded for the analysis & quali screens
-    const sess = createSession(S(), 'practice'); for (const c of sess.cars) if (c.isPlayer) c.prog = app.tab.prog?.[c.did] || 'setup';
+    const sess = createSession(S(), 'practice'); updateSettings({ speed: 'normal' }); for (const c of sess.cars) if (c.isPlayer) c.prog = app.tab.prog?.[c.did] || 'setup';
     commitSession(S()); persist(); render(); toast('Session complete — engineering report and lap data updated.'); },
   toQuali: () => { if (WK().live) commitSession(S()); WK().phase = 'quali'; persist(); render(); },
-  liveFP: () => { const sess = createSession(S(), 'practice'); for (const c of sess.cars) if (c.isPlayer) c.prog = app.tab.prog?.[c.did] || 'setup'; persist(); render(); },
-  liveQ: () => { createSession(S(), 'quali'); persist(); render(); },
+  liveFP: () => { const sess = createSession(S(), 'practice'); updateSettings({ speed: 'normal' }); for (const c of sess.cars) if (c.isPlayer) c.prog = app.tab.prog?.[c.did] || 'setup'; persist(); render(); },
+  liveQ: () => { createSession(S(), 'quali'); updateSettings({ speed: 'normal' }); persist(); render(); },
 });
 
 function qualiView(s, wk, t) {
@@ -225,8 +238,10 @@ function strategyView(s, wk, t) {
     const chk = (c, i) => { const n = lapsOf(i), e = est(c); return n > e + 2 ? ` <span class="bad tiny">stint ${n}L &gt; ~${e}L life</span>` : ` <span class="tiny muted">stint ${n}L / ~${e}L life</span>`; };
     return `<div class="card"><div class="row"><h3 style="margin:0">${esc(s.drivers[did].name)}</h3><span class="pill">Grid P${wk.grid.indexOf(did) + 1}</span></div>
     <div class="small muted" style="margin:.3rem 0">Estimated stint life: ${stints}</div>
-    <div class="col">${opts.map((o) => { const tag = o === lab.conservative ? 'Conservative' : o === lab.aggressive ? 'Aggressive' : o === lab.balanced ? 'Balanced' : ''; const on = cur.name === o.name; return `<button class="choice ${on ? 'on' : ''}" data-act="pickPlan" data-arg="${did}:${o.name}"><div class="row"><span>${[o.start, ...o.stops.map((x) => x.c)].map((c) => tyreBadge(c)).join('')}</span><b class="small">${o.stops.length}-stop</b>${tag ? pill(tag, tag === 'Aggressive' ? 'warn' : tag === 'Conservative' ? 'good' : 'info') : ''}<span class="sp"></span><span class="small mono">${o.delta < 0.5 ? 'fastest' : '+' + o.delta.toFixed(0) + 's'}</span></div><div class="tiny muted">Stops: ${o.stops.map((x) => 'L' + x.lap).join(', ')} · Tyre-cliff risk: ${o.risk}</div></button>`; }).join('')}</div>
-    <h4 style="margin-top:.7rem">Edit plan</h4>
+    <div class="col">${opts.map((o) => { const tag = o === lab.conservative ? 'Conservative' : o === lab.aggressive ? 'Aggressive' : o === lab.balanced ? 'Balanced' : ''; const on = cur.name === o.name; return `<button class="choice ${on ? 'on' : ''}" data-act="pickPlan" data-arg="${did}:${o.name}"><div class="row"><span>${[o.start, ...o.stops.map((x) => x.c)].map((c) => tyreBadge(c)).join('')}</span><b class="small">${o.stops.length}-stop</b>${tag ? pill(tag, tag === 'Aggressive' ? 'warn' : tag === 'Conservative' ? 'good' : 'info') : ''}<span class="sp"></span><span class="small mono">${o.delta < 0.5 ? 'fastest' : '+' + o.delta.toFixed(0) + 's'}</span></div>${planBar(o, wk.laps, null, null, true)}<div class="tiny muted">Stops: ${o.stops.map((x) => 'L' + x.lap).join(', ')} · Tyre-cliff risk: ${o.risk}</div></button>`; }).join('')}</div>
+    <h4 style="margin-top:.7rem">Your plan</h4>${planBar(cur, wk.laps, wk.weather.wet, est)}
+    <div class="tiny muted" style="margin:.2rem 0 .4rem" title="Real F1 allocation: 13 dry sets + 4 inters + 3 wets per driver for the weekend. Sets used in practice/qualifying can be fitted in the race at their remaining grip — you choose at every stop.">Sets left for the race ⓘ: ${setsLine(wk, did)}</div>
+    <h4 style="margin-top:.4rem">Edit plan</h4>
     <div class="row small">Start ${['S', 'M', 'H', 'I', 'W'].map((c) => `<button type="button" class="btn sm ${cur.start === c ? 'on' : ''}" data-act="planStart" data-arg="${did}:${c}" title="${COMPOUNDS[c].name}: ~${est(c)} laps in expected conditions">${tyreBadge(c)} <span class="tiny">~${est(c)}L</span></button>`).join('')}${chk(cur.start, -1)}</div>
     ${cur.stops.map((st, i) => `<div class="row small" style="margin-top:.3rem">Stop ${i + 1}: lap <input type="number" min="1" max="${wk.laps - 1}" value="${st.lap}" style="width:70px" data-change="planLap" data-arg="${did}:${i}"> → ${['S', 'M', 'H', 'I', 'W'].map((c) => `<button class="btn sm ${st.c === c ? 'on' : ''}" data-act="planComp" data-arg="${did}:${i}:${c}" title="~${est(c)} laps">${tyreBadge(c)}</button>`).join('')}${chk(st.c, i)}<button class="btn sm ghost" data-act="planDel" data-arg="${did}:${i}" aria-label="Remove stop">✕</button></div>`).join('')}
     <div class="row" style="margin-top:.4rem"><button class="btn sm" data-act="planAdd" data-arg="${did}">+ Add stop</button></div>
@@ -250,7 +265,7 @@ on({
   fuel: (arg) => { const [did, v] = arg.split(':'); WK().fuel[did] = +v; render(); },
   autoPlanToggle: (a, el) => { app.tab.autoPlan = el.checked; },
   startRace: () => {
-    const race = buildRace(S());
+    const race = buildRace(S()); updateSettings({ speed: 'normal' });
     for (const c of race.cars) if (c.isPlayer) c.autoPlan = app.tab.autoPlan !== false;
     persist(); go('race');
   },

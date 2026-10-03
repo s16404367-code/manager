@@ -59,6 +59,12 @@ export function lapProfile(track, carAdj = null) {
   // sector boundaries at 1/3 and 2/3 distance
   prof.fullThrottle = prof.phase.reduce((a, ph, i) => a + (ph === 'throttle' ? dt[i] : 0), 0) / total;
   prof.sectorTf = [tf[Math.floor(N / 3)], tf[Math.floor((2 * N) / 3)]];
+  // Active-aero straight-mode (X-mode) zones: long full-throttle stretches at high speed (2026 rules replace DRS)
+  const vmaxAll = Math.max(...prof.v); const fast = prof.phase.map((ph, i) => ph === 'throttle' && prof.v[i] > vmaxAll * 0.72);
+  const zones = []; let st = -1;
+  for (let i = 0; i <= N; i++) { const f = fast[i % N] && i < N; if (f && st < 0) st = i; if (!f && st >= 0) { if (i - st > N * 0.035) zones.push([st / N, i / N]); st = -1; } }
+  if (zones.length > 1 && zones[0][0] === 0 && zones[zones.length - 1][1] === 1) { const last = zones.pop(); zones[0] = [last[0] - 1, zones[0][1]]; }
+  prof.aeroZones = zones.slice().sort((a, b) => (b[1] - b[0]) - (a[1] - a[0])).slice(0, 4).sort((a, b) => a[0] - b[0]);
   cache[key] = prof; return prof;
 }
 // Time-fraction -> {d (distance fraction), v (km/h), gear, throttle, brake, i}

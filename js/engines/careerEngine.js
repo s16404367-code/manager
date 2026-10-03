@@ -7,6 +7,7 @@ import { PROJECTS, APPROACHES, FACILITIES, SPONSOR_POOL, REGULATIONS, EVENTS, AT
 import { DRIVERS } from '../data/drivers.js';
 import { trackById } from '../data/tracks.js';
 import { ensureSchedule, raceDue, YEAR_WEEKS, nextRaceWeek, weekLabel } from './calendarEngine.js';
+import { raceIncome, seasonBonus, SPONSOR_TERMS, regVoteOutcome, runTest, TESTS, attrFocus, defaultSplit, PU_SUPPLIERS, applyPU, evolveSuppliers, postSeasonLaps } from './economy.js';
 import { deptQ, facLvl, correlationQuality, genStaff, genStaffMarket, driverSalary, driverRating, DIFFICULTY, POINTS, pickCalendar, seasonObjectives } from './world.js';
 
 const rngOf = (state, salt) => { const r = new RNG((state.rngS ^ hashStr(String(salt))) >>> 0); return r; };
@@ -18,7 +19,7 @@ export function ledger(state, cat, amount, text, capped = true) {
   const t = pt(state); t.cash += amount;
   if (amount < 0 && capped) t.budgetSpent += -amount;
   state.ledger.unshift({ season: state.season, round: state.round, cat, amount: Math.round(amount), text });
-  if (state.ledger.length > 300) state.ledger.pop();
+  if (state.ledger.length > 900) state.ledger.pop();
 }
 const diffOf = (s) => DIFFICULTY[s.difficulty] || DIFFICULTY.standard;
 
@@ -88,13 +89,14 @@ export function applyRaceResult(state) {
   const diff = diffOf(state);
   const pos = teamPos(state, state.player);
   const sf = 12 / state.calendar.length; // annualised per-race payments
-  ledger(state, 'Income', sf * 1.6e6 + (10 - pos) * 0.25e6 * sf, 'Commercial rights distribution', false);
+  for (const [cat, amt, txt] of raceIncome(state, P, mine, pos)) ledger(state, cat, amt, txt, false);
+  { const sup = PU_SUPPLIERS[P.puSup] || PU_SUPPLIERS.ardent; ledger(state, 'Technical', -sup.fee / state.calendar.length, `${sup.name} — PU ${P.puSup === 'inhouse' ? 'running costs' : 'lease'}`); }
   for (const s of state.sponsors) {
     const pay = s.perRace * sf * (0.6 + 0.4 * s.sat / 100);
     ledger(state, 'Sponsors', pay, `${s.name} payment`, false);
     const met = sponsorMet(s, mine);
     s.sat = clamp(s.sat + (met ? 6 : -5) + (s.volatile ? r.range(-6, 6) : 0), 0, 100);
-    if (met) ledger(state, 'Sponsors', s.bonus, `${s.name} objective bonus`, false);
+    if (met) ledger(state, 'Sponsors', s.bonus * (SPONSOR_TERMS[s.term]?.bonus || 1), `${s.name} objective bonus`, false);
     s.racesLeft--;
   }
   const expired = state.sponsors.filter((s) => s.racesLeft <= 0 || s.sat < 12);
@@ -123,11 +125,12 @@ export function applyRaceResult(state) {
   let bd = clamp((expected - avgFin) * 0.9, -6, 6) * (avgFin > expected ? 1 / state.board.patience : 1);
   if (P.cash < 0) bd -= 2;
   state.board.confidence = clamp(state.board.confidence + bd, 0, 100);
+  (state.board.hist ||= []).push({ s: state.season, r: state.round + 1, c: Math.round(state.board.confidence), d: Math.round(bd * 10) / 10, why: avgFin <= expected ? `Avg finish P${avgFin.toFixed(1)} vs expected P${expected}` : `Avg finish P${avgFin.toFixed(1)} below expected P${expected}` }); if (state.board.hist.length > 60) state.board.hist.shift();
   // memory for AI: which AI teams lost positions to player stops
   for (const t of Object.values(state.teams)) if (!t.isPlayer && t.memory) t.memory.undercutsSuffered += race.cars.filter((c) => c.isPlayer && c.stops.length).length ? 0.1 : 0;
   // board critical
   if (state.board.confidence < 8 && !state.gameOver) { state.gameOver = { reason: 'fired', text: 'The board has lost confidence and relieved you of your duties.' }; }
-  if (P.cash < -40e6 && !state.gameOver) state.gameOver = { reason: 'bankrupt', text: 'The team has entered administration after running out of cash.' };
+  if (P.cash < -60e6 && !state.gameOver) state.gameOver = { reason: 'bankrupt', text: 'The team has entered administration after running out of cash.' };
   commit(state, r);
   state.round++;
   state.weekend = null;
@@ -146,7 +149,14 @@ export function advanceWeek(state) {
   state.week++;
   if (state.week === state.schedule.devOpen) note(state, 'good', 'Development window is open: upgrade projects can start.');
   if (state.week === state.schedule.testing) note(state, 'info', 'Pre-season testing this week — the car runs for the first time.');
+  const tw = testWeeks(state); state.testsDone ||= {};
+  for (const [k, w] of Object.entries(tw)) if (state.week === w && !state.testsDone[k + state.season] && !state.pendingEvent) { state.testsDone[k + state.season] = true; state.pendingEvent = { kind: 'test', test: k }; }
   return state.pendingEvent ? 'event' : 'ok';
+}
+export function testWeeks(state) {
+  const sc = state.schedule; if (!sc) return {}; const n = sc.weeks.length;
+  const mid = n >= 6 ? sc.weeks[Math.floor(n * 0.45)] + 1 : null;
+  return { pre: sc.testing, ...(mid && mid < sc.last ? { mid } : {}), post: Math.min(YEAR_WEEKS - 1, sc.last + 1) };
 }
 export function advanceToRace(state, maxWeeks = 60) {
   let g = 0; let r = 'ok';
@@ -169,6 +179,7 @@ export function betweenRaces(state, weeks = 2) {
   const pk = weeks / 2; // event probabilities were tuned per 2-week gap
   const P = pt(state); const diff = diffOf(state);
   for (let w = 0; w < weeks; w++) { progressProjects(state, r); progressFacilities(state); }
+  if (P.autoFit !== false) for (const p of state.projects.filter((x) => x.stage === 'ready')) deployProject(state, p.id, p.qty >= 2 ? null : 0); // parts go straight onto the car
   // staff fatigue/morale
   const active = state.projects.filter((p) => p.stage === 'design' || p.stage === 'manufacturing').length;
   for (const [k, d] of Object.entries(P.depts)) {
@@ -215,8 +226,9 @@ export function betweenRaces(state, weeks = 2) {
   const len = state.calendar.length;
   if (!state.regulation.announced && state.round >= Math.floor(len / 2)) {
     const reg = r.pick(REGULATIONS);
-    state.regulation = { next: reg.id, announced: true };
-    note(state, 'warn', `REGULATIONS: "${reg.name}" confirmed for next season. ${reg.desc}`);
+    state.regulation = { next: null, proposal: reg.id, announced: true };
+    if (!state.pendingEvent) state.pendingEvent = { kind: 'regvote', regId: reg.id };
+    else { const o = regVoteOutcome(state, reg, false, r); state.regulation.vote = o; if (o.passed) state.regulation.next = reg.id; note(state, o.passed ? 'warn' : 'info', `F1 Commission: "${reg.name}" ${o.passed ? 'PASSED' : 'rejected'} (${o.total}/${o.of} votes, 28 needed). You abstained.`); }
   }
   // sponsor offers
   if (state.sponsors.length < 4 && r.chance(0.5 * pk)) {
@@ -380,6 +392,15 @@ export function resolveEvent(state, optIdx) {
     if (fx.carAttr) for (const [k, v] of Object.entries(fx.carAttr)) P.car[k] += v;
     if (fx.junior) { const id = 'drv_jr_x' + state.season + state.round; state.drivers[id] = { id, name: `${r.pick(['Luca', 'Mateo', 'Arvid', 'Rohan', 'Jules'])} ${r.pick(['Moretti', 'Lindahl', 'Varma', 'Santos', 'Dubreuil'])}`, nat: 'INT', age: 18, team: 'academy', teamId: null, academy: true, pace: 75, craft: 70, cons: 68, tyre: 70, wet: 72, fb: 68, start: 72, pot: 96, pers: 'aggressive', morale: 75, confidence: 70, form: 0, contract: { years: 3, salary: 0.6e6 }, stats: { starts: 0, wins: 0, podiums: 0, points: 0 } }; note(state, 'good', 'A new junior joins the academy.'); }
     if (fx.gamble && r.chance(fx.gamble)) { ledger(state, 'Events', -3e6, 'FIA fine'); P.car.medAero -= 1.5; note(state, 'bad', 'Race control ruled against you: $3M fine and forced floor modification.'); }
+  } else if (ev.kind === 'regvote') {
+    const reg = REGULATIONS.find((x) => x.id === ev.regId); const o = regVoteOutcome(state, reg, optIdx === 0, r);
+    state.regulation.vote = o; state.regulation.next = o.passed ? reg.id : null;
+    note(state, o.passed ? 'warn' : 'info', `F1 Commission vote on "${reg.name}": ${o.passed ? 'PASSED' : 'REJECTED'} — ${o.total}/${o.of} votes (28 needed). You voted ${optIdx === 0 ? 'FOR' : 'AGAINST'}.${o.passed ? ' It applies next season.' : ''}`);
+  } else if (ev.kind === 'test') {
+    const focus = ['balanced', 'car', 'drivers'][optIdx] || 'balanced';
+    const out = runTest(state, P, ev.test, 0.5, focus);
+    ledger(state, 'Operations', -(ev.test === 'pre' ? 0.9e6 : 0.5e6) * diffOf(state).cost, TESTS[ev.test].label);
+    note(state, 'good', `${TESTS[ev.test].label}: ${out.laps} laps (${focus} focus). Car knowledge ${Math.round(P.carKnow * 100)}%; ${out.drv.map((x) => `${state.drivers[x.did].name} ${Math.round(state.drivers[x.did].carFam * 100)}%`).join(', ')}.${out.revealed ? ` ${out.revealed} upgrade(s) measured.` : ''}`);
   } else if (ev.kind === 'loan') {
     // handled elsewhere
   }
@@ -387,7 +408,7 @@ export function resolveEvent(state, optIdx) {
 }
 export function takeLoan(state, amount) { const P = pt(state); ledger(state, 'Finance', amount, 'Emergency loan', false); state.loan = (state.loan || 0) + amount * 1.15; state.board.confidence = clamp(state.board.confidence - 5, 0, 100); note(state, 'warn', `Loan of ${money(amount)} taken. ${money(amount * 1.15)} is repaid at season end.`); void P; }
 export function sponsorAdvance(state) { const P = pt(state); const tot = state.sponsors.reduce((a, s) => a + s.perRace * 2, 0); if (!tot) return; ledger(state, 'Sponsors', tot * 0.85, 'Sponsor advance (2 races, 15% discount)', false); state.sponsors.forEach((s) => { s.racesLeft = Math.max(1, s.racesLeft - 2); s.sat -= 5; }); void P; }
-export function acceptSponsor(state, id) { const o = state.sponsorOffers.find((x) => x.id === id); if (!o || state.sponsors.length >= 4) return; state.sponsors.push({ ...o, sat: 62 }); state.sponsorOffers = state.sponsorOffers.filter((x) => x.id !== id); note(state, 'good', `${o.name} signed as a sponsor.`); }
+export function acceptSponsor(state, id, term = 'full') { const o = state.sponsorOffers.find((x) => x.id === id); if (!o || state.sponsors.length >= 4) return; const T = SPONSOR_TERMS[term] || SPONSOR_TERMS.full; const left = state.calendar.length - state.round; state.sponsors.push({ ...o, sat: 62, term, perRace: o.perRace * T.pay, racesLeft: Math.max(2, Math.min(T.races(state.calendar.length), term === 'multi' ? left + state.calendar.length : left)) }); state.sponsorOffers = state.sponsorOffers.filter((x) => x.id !== id); note(state, 'good', `${o.name} signed as a sponsor.`); }
 export function negotiateSponsor(state, id) {
   const o = state.sponsorOffers.find((x) => x.id === id); if (!o || o.negotiated) return 'Already negotiated.';
   const r = rngOf(state, 'neg' + id + state.round); const P = pt(state); o.negotiated = true;
@@ -408,9 +429,9 @@ export const TRAINING = {
 export function startTraining(state, did, k) {
   const d = state.drivers[did]; const T = TRAINING[k]; if (!T) return { ok: false, msg: 'Unknown programme' };
   if (d.training) return { ok: false, msg: `${d.name} is already in a programme.` };
-  if (pt(state).cash < T.cost) return { ok: false, msg: 'Not enough cash.' };
+  const neg = pt(state).cash < T.cost; if (neg) state.board.confidence = clamp(state.board.confidence - 1, 0, 100);
   ledger(state, 'Drivers', -T.cost, `${T.label}: ${d.name}`); d.training = { k, left: T.races };
-  return { ok: true, msg: `${d.name} started ${T.label}.` };
+  return { ok: true, msg: `${d.name} started ${T.label}.${neg ? ' Paid on credit — cash is now negative (board noticed).' : ''}` };
 }
 export function fitComponent(state, slot, key) { const pen = fitNew(state, pt(state), slot, key); ledger(state, 'Technical', -0.25e6, `New ${COMP[key].name}`); return pen; }
 export function growDriver(d, coachQ, r, rate = 0.25) {
@@ -487,8 +508,8 @@ export function seasonEnd(state) {
   const r = rngOf(state, 'season' + state.season);
   const P = pt(state); const st = standings(state);
   const pos = st.teams.findIndex((t) => t.id === P.id) + 1;
-  const prize = (11 - pos) * 6e6 + 10e6;
-  ledger(state, 'Income', prize, `Constructors' prize money (P${pos})`, false);
+  const prize = seasonBonus(pos); state._lastPos = pos;
+  ledger(state, 'Income', prize, `Season-end constructors' bonus (P${pos})`, false);
   if (state.loan) { ledger(state, 'Finance', -state.loan, 'Loan repayment', false); state.loan = 0; }
   // cost cap
   let capPen = 0;
@@ -509,7 +530,7 @@ export function seasonEnd(state) {
     season: state.season, year: state.year, pos, points: P.points, prize, objectives: objs, capPen,
     drivers: P.drivers.map((id) => ({ id, name: state.drivers[id].name, pts: state.drivers[id].seasonPts || 0, pos: st.drivers.findIndex((d) => d.id === id) + 1 })),
     champion: { name: champion?.name, team: state.teams[champion?.teamId]?.name, pts: champion?.pts }, consChamp: { name: consChamp.name, pts: consChamp.pts },
-    cash: P.cash, spent: P.budgetSpent, board: state.board.confidence, reg: state.regulation.next,
+    cash: P.cash, carry: P.cash, spent: P.budgetSpent, board: state.board.confidence, reg: state.regulation.next,
     table: st.teams.map((t) => ({ name: t.name, pts: t.pts, color: t.color })),
   };
   state.history.seasons.push(review);
@@ -530,8 +551,9 @@ export function startNextSeason(state) {
     // merge per-car mods into base (parts carry to new chassis equally)
     for (const k of CAR_ATTRS) { const m = ((t.carMods[0][k] || 0) + (t.carMods[1][k] || 0)) / 2; t.car[k] += m; }
     t.carMods = [{}, {}];
-    const focus = t.isPlayer ? P.nextYearFocus || 0 : r.range(0.1, 0.4);
+    const focusT = t.isPlayer ? P.nextYearFocus || 0 : r.range(0.1, 0.4);
     for (const k of CAR_ATTRS) {
+      const focus = t.isPlayer ? attrFocus(focusT, P.nextYearSplit, k) : focusT;
       t.car[k] = t.car[k] + (72 - t.car[k]) * 0.08; // natural convergence
       if (reg && reg.attrs.includes(k)) {
         const regress = reg.regress * (1 - focus * 0.9);
@@ -541,7 +563,13 @@ export function startNextSeason(state) {
       t.car[k] = clamp(round(t.car[k], 1), 30, 105);
     }
     t.points = 0; t.results = []; t.pu = [0, 0]; resetSeason(t); t.budgetSpent = 0;
+    if (t.puNext && t.puNext !== t.puSup) { t.puSup = t.puNext; }
+    t.puNext = null;
+    if (t.puSup === 'inhouse') t.puOwn = clamp((t.puOwn || 0) + 1 + ((t.depts?.pu ? deptQ(t, 'pu') : 60) - 55) * 0.08 + r.range(0, 1.2), -2, 12);
+    t.carKnow = (t.carKnow ?? 0.3) * 0.6;
   }
+  evolveSuppliers(state, r); for (const t of Object.values(state.teams)) applyPU(state, t);
+  for (const d of Object.values(state.drivers)) if (d.carFam != null) d.carFam *= 0.6;
   if (reg) note(state, 'warn', `New regulations in force: ${reg.name}.`);
   // drivers: age, growth, contracts
   const drvCoach = deptQ(P, 'drv');
@@ -597,9 +625,24 @@ export function startNextSeason(state) {
   state.board.target = clamp(Math.min(state.board.target, last.pos + 1), 1, 10);
   if (last.pos > state.board.target + 2) state.board.target = clamp(state.board.target + 1, 1, 10);
   state.board.objectives = seasonObjectives(state);
-  P.nextYearFocus = 0.15;
+  P.nextYearFocus = 0.15; P.nextYearSplit = defaultSplit();
   state.phase = 'hq'; state.review = null;
   note(state, 'info', `Season ${state.season} (${state.year}) begins. Board target: P${state.board.target}.`);
   commit(state, r);
 }
 export { OBJ_TEXT, PROFILES };
+// ---------------- Power unit supplier & next-year split ----------------
+export function choosePU(state, key) {
+  const P = pt(state); const S = PU_SUPPLIERS[key]; if (!S) return { ok: false, msg: 'Unknown supplier' };
+  if (key === P.puSup) { P.puNext = null; return { ok: true, msg: `Staying with ${S.name}.` }; }
+  P.puNext = key;
+  if (key === 'inhouse' && !P.puBuilt) { ledger(state, 'Technical', -S.setup, 'In-house PU factory build-up'); P.puBuilt = true; P.puOwn = P.puOwn ?? 0; }
+  note(state, 'info', `Signed with ${S.name} for next season (${money(S.fee)}/season).`);
+  return { ok: true, msg: `${S.name} from next season.` };
+}
+export function setSplit(state, area, val) {
+  const P = pt(state); const sp = { ...(P.nextYearSplit || defaultSplit()) }; sp[area] = clamp(Math.round(val), 0, 100);
+  const others = Object.keys(sp).filter((k) => k !== area); let rest = 100 - sp[area]; const tot = others.reduce((a, k) => a + sp[k], 0) || 1;
+  others.forEach((k, i) => { sp[k] = i === others.length - 1 ? 0 : Math.round(sp[k] / tot * rest); }); sp[others[others.length - 1]] = 100 - Object.values(sp).reduce((a, v) => a + v, 0) + sp[others[others.length - 1]];
+  P.nextYearSplit = sp; return sp;
+}

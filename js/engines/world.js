@@ -7,6 +7,7 @@ import { DRIVERS } from '../data/drivers.js';
 import { TRACKS } from '../data/tracks.js';
 import { DEPARTMENTS, FACILITIES, FIRST, LAST, SPECIALTIES, SPONSOR_POOL } from '../data/content.js';
 
+import { START_PURSE, defaultSplit, assignSuppliers, applyPU } from './economy.js';
 export const SAVE_VERSION = 4;
 export const POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
 export const DIFFICULTY = {
@@ -48,8 +49,8 @@ function buildOrg(rng, team, profileKey, philKey, diff) {
   const td = genStaff(rng, 'Technical Director', 'td', P.staff + 3);
   return {
     facilities, facilityBuilds: [], depts, td,
-    cash: P.cash / (diff?.cost || 1), rep: P.rep, profile: profileKey, philosophy: philKey,
-    budgetSpent: 0, crunch: false, nextYearFocus: 0.15, correlationMod: 0,
+    cash: START_PURSE / (diff?.cost || 1), /* equal starting purse for every team */ rep: P.rep, profile: profileKey, philosophy: philKey,
+    budgetSpent: 0, crunch: false, nextYearFocus: 0.15, nextYearSplit: defaultSplit(), correlationMod: 0, carKnow: 0.3,
   };
 }
 
@@ -99,6 +100,8 @@ export function createWorld(opts) {
     const prof = t.id === playerId && opts.custom ? opts.custom.profile : TIER_PROFILE[t.tier];
     teams[t.id] = { ...t, isPlayer: t.id === playerId, carMods: [{}, {}], points: 0, ...buildOrg(rng, t, prof, t.philosophy, t.id === playerId ? diff : null), pu: [0, 0], results: [], memory: { undercutsSuffered: 0 } };
   }
+  assignSuppliers(teams, rng);
+  const st0 = { puEvo: {} }; for (const t of Object.values(teams)) { if (t.isPlayer && opts.custom?.pu) t.puSup = opts.custom.pu; applyPU(st0, t); }
   // ensure every team has 2 drivers
   for (const t of Object.values(teams)) {
     let ds = Object.values(drivers).filter((d) => d.teamId === t.id);
@@ -125,7 +128,7 @@ export function createWorld(opts) {
   if (opts.mode === 'career') {
     // starting sponsors
     const pool = SPONSOR_POOL.filter((s) => s.minRep <= P.rep).slice(0, 3);
-    state.sponsors = pool.map((s) => ({ ...s, sat: 65, racesLeft: len, perRace: s.perRace * prof.sponsorBase }));
+    state.sponsors = pool.map((s, i) => ({ ...s, sat: 65, term: i === 0 ? 'multi' : 'full', racesLeft: i === 0 ? len * 2 : len, perRace: s.perRace * prof.sponsorBase * (i === 0 ? 0.88 : 1) }));
     state.staffMarket = genStaffMarket(rng, 10);
     state.board.objectives = seasonObjectives(state);
     state.inbox.push({ sev: 'info', text: `Welcome, Team Principal. The board expects P${state.board.target} or better in the Constructors' Championship.`, round: 0 });

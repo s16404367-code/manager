@@ -3,7 +3,7 @@ import { RNG, hashStr } from '../sim/rng.js';
 import { clamp, avg } from '../sim/util.js';
 import { trackById, monthFor, climateAir, lapProfile } from '../data/tracks.js';
 import { PERSONALITIES } from '../data/drivers.js';
-import { effectiveCar, trackScore, carDeficitSec, setupOptimum, setupQuality, setupEffects, defaultSetup, SETUP_KEYS, SETUP_LABEL, AI_FX } from './carModel.js';
+import { effectiveCar, trackScore, carDeficitSec, setupOptimum, setupQuality, setupEffects, defaultSetup, SETUP_KEYS, SETUP_LABEL, AI_FX, DRIVER_W } from './carModel.js';
 import { generateWeather, forecast } from './weatherEngine.js';
 import { planOptions, labelPlans, clonePlan } from './strategyEngine.js';
 import { wearPerLap, COMPOUNDS, wetPenalty, ALLOCATION, tyrePaceLoss } from './tyreEngine.js';
@@ -40,7 +40,7 @@ export function startWeekend(state) {
       if (team.isPlayer) {
         wk.noise[did] = Object.fromEntries(SETUP_KEYS.map((k) => [k, rng.normal(0, 1)]));
         const simB = facLvl(team, 'simulator') * 0.06 + deptQ(team, 'vd') * 0.002;
-        wk.knowledge[did] = Object.fromEntries(SETUP_KEYS.map((k) => [k, clamp(0.1 + simB + (state.setupPenalty || 0), 0, 0.9)]));
+        wk.knowledge[did] = Object.fromEntries(SETUP_KEYS.map((k) => [k, clamp(0.1 + simB + (state.setupPenalty || 0) + ((team.carKnow ?? 0.3) - 0.3) * 0.3, 0, 0.9)]));
         wk.setups[did] = defaultSetup();
         wk.qualiPrep[did] = 0;
       }
@@ -58,7 +58,7 @@ export function startWeekend(state) {
   ];
   const rainy = weather.wet.some((w) => w > 0.12);
   wk.raceDeg = clamp(1 + rng.normal(0, 0.11) + (weather.trackTemp - wk.days[0].track) * 0.006 + (weather.trackTemp - 35) * 0.002 + (rainy ? rng.range(-0.08, 0.1) : 0), 0.78, 1.3);
-  for (const did of pt.drivers) { wk.know[did] = clamp(0.25 + facLvl(pt, 'simulator') * 0.05 + (state.drivers[did].age > 27 ? 0.1 : 0), 0, 0.6); ensurePC(pt); }
+  for (const did of pt.drivers) { wk.know[did] = clamp(0.2 + facLvl(pt, 'simulator') * 0.04 + (state.drivers[did].age > 27 ? 0.08 : 0) + ((state.drivers[did].carFam ?? 0.3) - 0.3) * 0.35, 0, 0.7); /* testing days raise driver familiarity */ ensurePC(pt); }
   wk.month = month;
   // Tyre sets (real-life style allocation) and run log for the player's drivers
   wk.sets = {}; wk.runLog = {}; wk.condKnow = {}; wk.condBias = {};
@@ -92,18 +92,22 @@ export function engineerEstimate(wk, did) {
   return Object.fromEntries(SETUP_KEYS.map((key) => [key, clamp(Math.round((o[key] + n[key] * (1 - k[key]) * 3.2 + (cb ? cb[key] * (1 - ck) : 0)) * 2) / 2, 0, 10)]));
 }
 
+// Simplified to four programmes (v4): each bundles the old specialist runs.
 export const PRACTICE_PROGRAMS = {
-  setup: { label: 'Setup work', desc: 'Converge on the setup optimum. Improves engineer estimates.' },
-  longrun: { label: 'Long runs', desc: 'Learn tyre degradation. Better strategy estimates.' },
-  qualisim: { label: 'Qualifying simulation', desc: 'Low-fuel runs. Small quali pace gain (~0.05–0.1s).' },
-  correlation: { label: 'Aero correlation test', desc: 'Measure newly deployed parts — reveals real gain.' },
-  conditions: { label: 'Aero rake & conditions correlation', desc: 'Sensor rakes + wind/temperature mapping. Removes the bias from wind, temperature and weather changes in the engineers\' estimate.' },
-  tyrecomp: { label: 'Compound comparison', desc: 'Short runs on each compound. Learns how every tyre behaves here (all-compound data for quali & strategy).' },
-  reliability: { label: 'Reliability run', desc: 'Burn-in checks: 12% lower failure risk this weekend, adds PU mileage.' },
+  setup: { label: '🔧 Setup & quali runs', desc: 'Converge on the setup and do low-fuel laps. Raises engineer confidence in the setup and adds a little quali pace.' },
+  longrun: { label: '🛞 Race runs (all compounds)', desc: 'Heavy-fuel stints on each compound. Learns degradation → better strategy & tyre estimates.' },
+  aero: { label: '🌬️ Aero & conditions test', desc: 'Measures new parts (reveals real gain) and maps wind/temperature so the engineers\' estimate is not biased by conditions.' },
+  reliability: { label: '🛡️ Reliability run', desc: 'Burn-in checks: 12% lower failure risk this weekend, adds PU mileage.' },
 };
+const PROG_PARTS = { setup: [['setup', 0.9], ['qualisim', 0.6]], longrun: [['longrun', 0.85], ['tyrecomp', 0.6]], aero: [['correlation', 0.9], ['conditions', 0.85]], reliability: [['reliability', 1]],
+  qualisim: [['setup', 0.9], ['qualisim', 0.6]], tyrecomp: [['longrun', 0.85], ['tyrecomp', 0.6]], correlation: [['correlation', 0.9], ['conditions', 0.85]], conditions: [['correlation', 0.9], ['conditions', 0.85]] };
+export function applyProgram(state, did, prog, rng, mult = 1, lines = []) {
+  for (const [p, k] of PROG_PARTS[prog] || [[prog, 1]]) applyOne(state, did, p, rng, mult * k, lines);
+  return lines;
+}
 
 // Apply one practice programme's learning for a driver. mult scales the gain (1 = a full classic session).
-export function applyProgram(state, did, prog, rng, mult = 1, lines = []) {
+function applyOne(state, did, prog, rng, mult = 1, lines = []) {
   const wk = state.weekend; const t = trackById(wk.trackId); const pt = state.teams[state.player];
   if (state.mode === 'quick') mult *= 2.2;
   const d = state.drivers[did];
@@ -147,9 +151,9 @@ export function applyProgram(state, did, prog, rng, mult = 1, lines = []) {
 export function gainKnow(state, did, laps) {
   const wk = state.weekend; if (!wk.know || wk.know[did] == null) return;
   const d = state.drivers[did]; const k = wk.knowledge[did];
-  const rate = 0.012 * (0.7 + d.fb / 160);
+  const rate = 0.0075 * (0.7 + d.fb / 160);
   wk.know[did] = clamp(wk.know[did] + rate * laps * (1 - wk.know[did]), 0, 1);
-  if (k) for (const key of SETUP_KEYS) k[key] = clamp(k[key] + 0.004 * laps, 0, 0.97);
+  if (k) for (const key of SETUP_KEYS) k[key] = clamp(k[key] + 0.0025 * laps, 0, 0.97);
 }
 export const AI_KNOW = 0.62;
 export function knowOf(state, did) { const wk = state.weekend; return state.drivers[did].teamId === state.player ? (wk.know?.[did] ?? AI_KNOW) : AI_KNOW; }
@@ -157,7 +161,7 @@ export function runPractice(state, programs) {
   const wk = state.weekend;
   const rng = new RNG((wk.seed + 101 * (wk.practice.done + 1)) >>> 0);
   const pt = state.teams[state.player]; const lines = [];
-  for (const did of pt.drivers) { applyProgram(state, did, programs[did] || 'setup', rng, 1, lines); gainKnow(state, did, 10); }
+  for (const did of pt.drivers) { applyProgram(state, did, programs[did] || 'setup', rng, 1, lines); gainKnow(state, did, 16); }
   wk.practice.done++;
   wk.practice.reports.push({ session: wk.practice.done, lines });
   return lines;
@@ -173,7 +177,7 @@ export function qualiLap(state, team, slot, did, t, wet, rng, plan) {
   const fx = team.isPlayer ? setupEffects(wk.setups[did], wk.opt[did], t) : { topSpeed: 0 };
   const tyre = wet > 0.6 ? 'W' : wet > 0.16 ? 'I' : 'S';
   const chosen = team.isPlayer && plan?.tyre ? plan.tyre : tyre;
-  let lt = t.baseLap - knowOf(state, did) * 0.3 + AI_KNOW * 0.3 + perf + (100 - d.pace) * 0.035 + (1 - sq) * 0.9 - (wk.qualiPrep[did] || 0) + wetPenalty(chosen, wet) + wet * 6 + wet * (100 - d.wet) * 0.04 - fx.topSpeed * t.drag * 2 + 5 * 0.032 - 0.45;
+  let lt = t.baseLap - knowOf(state, did) * 0.3 + AI_KNOW * 0.3 + perf + (100 - d.pace) * DRIVER_W + (1 - sq) * 0.9 - (wk.qualiPrep[did] || 0) + wetPenalty(chosen, wet) + wet * 6 + wet * (100 - d.wet) * 0.04 - fx.topSpeed * t.drag * 2 + 5 * 0.032 - 0.45;
   const push = plan?.push || 'normal';
   lt += { safe: 0.08, normal: 0, max: -0.12 }[push];
   const mistakeP = { safe: 0.03, normal: 0.07, max: 0.15 }[push] * (1 + wet) * (1 + (100 - d.cons) / 50);

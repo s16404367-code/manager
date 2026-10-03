@@ -55,7 +55,7 @@ export function startLive() {
       if (c.st === 'track') { const g = document.getElementById('m_' + c.did); if (g) g.style.opacity = 1; }
       if (c.did === selA || c.did === selB) {
         const id = c.did === selA ? 'ltele' : 'ltele2';
-        if (tele) updateTele(t, id, teleWho(c), tele.f, { k: c.kind === 'push' ? 1 : c.kind === 'out' ? 1.35 : 1.25, drs: c.kind === 'push' && sess.kind === 'practice', state: tele.state, follow: c.kind === 'push' && (c.cur?.notes || []).some((n) => n === 'tow' || n === 'dirty air') });
+        if (tele) updateTele(t, id, teleWho(c), tele.f, { k: c.kind === 'push' ? 1 : c.kind === 'out' ? 1.35 : 1.25, drs: sess.wet < 0.3, state: tele.state, follow: c.kind === 'push' && (c.cur?.notes || []).some((n) => n === 'tow' || n === 'dirty air') });
         else updateTele(t, id, teleWho(c), 0, { state: 'garage' });
       }
     });
@@ -115,7 +115,7 @@ function carCtrl(sess, c) {
   <div class="small" style="margin:.2rem 0 .4rem">${status}</div>
   <div class="tiny" style="margin-bottom:.3rem">On car: ${tyreBadge(c.tyre)} grip ${setGrip(app.state, c)}%${lastT ? ` · last timed lap on ${tyreBadge(lastT)}` : ''}</div>
   <div class="tiny muted">Tyre ${garage ? '' : '(change in garage)'}</div><div class="seg">${tyres.map((x) => `<button class="btn sm ${c.tyre === x ? 'on' : ''}" data-act="liveTyre" data-arg="${c.did}:${x}" ${garage ? '' : 'disabled'} title="${COMPOUNDS[x].name}">${tyreBadge(x)}</button>`).join('')}<span class="sp"></span><button class="btn sm ${c.newSet ? 'on' : ''}" data-act="liveSet" data-arg="${c.did}:1" ${garage ? '' : 'disabled'}>New set</button><button class="btn sm ${!c.newSet ? 'on' : ''}" data-act="liveSet" data-arg="${c.did}:0" ${garage ? '' : 'disabled'}>Used set</button></div>
-  <div class="tiny muted" style="margin:.15rem 0 .3rem">Sets: ${inv || '—'}</div>
+  <div class="tiny muted" style="margin:.15rem 0 .3rem" title="Real F1 weekend allocation: 13 dry sets (here 8 Soft, 3 Medium, 2 Hard) + 4 Intermediate + 3 Wet per driver. Sets used in practice/quali stay available for the race at their remaining grip.">Sets ⓘ: ${inv || '—'}</div>
   ${sess.kind === 'practice' ? `<div class="tiny muted">Programme</div><div class="seg wrap">${Object.entries(PRACTICE_PROGRAMS).map(([k, p]) => `<button class="btn sm ${c.prog === k ? 'on' : ''}" data-act="liveProg" data-arg="${c.did}:${k}" title="${esc(p.desc)}" ${garage ? '' : 'disabled'}>${p.label}</button>`).join('')}</div>` : `<div class="tiny muted">Push level</div><div class="seg">${[['safe', 'Safe'], ['normal', 'Normal'], ['max', 'Maximum']].map(([k, l]) => `<button class="btn sm ${c.push === k ? 'on' : ''}" data-act="livePush" data-arg="${c.did}:${k}">${l}</button>`).join('')}</div>`}
   <div class="tiny muted">Flying laps per run</div><div class="seg">${lapsOpts.map((n) => `<button class="btn sm ${c.plannedPush === n ? 'on' : ''}" data-act="liveLaps" data-arg="${c.did}:${n}">${n}</button>`).join('')}</div>
   <div class="row" style="margin-top:.5rem">${garage && !sess.flag ? `<button class="btn primary sm" data-act="liveOut" data-arg="${c.did}" ${c.go ? 'disabled' : ''}>▶ Send out</button>` : ''}${c.st === 'track' && c.kind !== 'in' ? `<button class="btn sm danger" data-act="liveBox" data-arg="${c.did}" ${c.boxReq ? 'disabled' : ''}>Box this lap</button>` : ''}</div></div>`;

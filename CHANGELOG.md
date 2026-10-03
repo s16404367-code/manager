@@ -1,5 +1,18 @@
 # Changelog
 
+## Round 10 — "Team Principal"
+- Race: you approve every pit stop and repair (engineers only propose; never on the final lap); choose new or used sets (grip % shown); tyre-change animation only for your cars.
+- 2026 energy rules: ERS modes removed. Overtake mode works only within 1.0s of the car ahead (never for the leader). Battery recharges automatically from braking and clipping.
+- DRS replaced by active aero (X-mode), shown as green zones on every track map and in the telemetry. Animated weather widget in the race bar.
+- Weekend: speed resets to 1× at the start of every session; FP1–FP3 last 60 min each; 4 practice programmes instead of 7; real 13-dry-set allocation explained.
+- Car & Dev: area → concept → approve. Parts go through a Design→Build→Ready→On the car stepper and are fitted automatically. Car overview grouped by area. Next-year effort split by area.
+- PU: 3 suppliers or your own in-house PU; identical allowance for every team (2026 pool, scaled to season length).
+- Economy: equal starting purse; per-race FOM, points share, hospitality, merchandise and TV income; season-end standings bonus; cash (including negative) carries over; sponsor terms (flagship races, two-season, performance-heavy).
+- F1 Commission rules vote (28/30). Board trend and reasons. Training grouped and allowed on credit. Facility effects shown per level.
+- Pre-season, in-season and post-season tests (post-season laps by standings) raise car knowledge and driver familiarity.
+- Car vs driver weighting is now car-dominant (~75/25).
+- New "this week" panel, milestone year plan, strategy plan bars, and an upgraded debrief timeline (SC/VSC/wet bands, used-set stripes, filters).
+
 ## v3.8
 - Pit-stop animation at the bottom of the race screen for every stop (your cars first): BOX flash, old tyre rolls off, new tyre rolls on, stationary timer, "Soft → Medium" label; blinking PIT tag in the timing tower on the pit lap.
 - Strategy chart: pit-lap numbers under the bars removed (compound + stint length stay in the coloured bars).

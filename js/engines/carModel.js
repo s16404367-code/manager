@@ -23,7 +23,11 @@ export function trackScore(car, t) {
   score -= coolPen;
   return { score, breakdown: { corner, straight, mech, braking: car.braking, coolPen, weights: w } };
 }
-export const carDeficitSec = (score, t) => (100 - score) * 0.055 * (t.baseLap / 85);
+// Car vs driver weighting: studies of the hybrid era (e.g. Bell et al., Sheffield/Journal of Sports Analytics)
+// attribute roughly 80-88% of performance differences to the car/team and ~12-20% to the driver.
+// Spread here: car 63→82 rating ≈ 1.25s/lap, driver pace 75→97 ≈ 0.45s/lap → car-dominant (~75/25).
+export const DRIVER_W = 0.02;
+export const carDeficitSec = (score, t) => (100 - score) * 0.065 * (t.baseLap / 85);
 
 export const SETUP_KEYS = ['frontWing', 'rearWing', 'ride', 'springs', 'arb', 'camber', 'toe', 'brakeBias', 'diff', 'pressure'];
 export const SETUP_GROUPS = [['Aerodynamics', ['frontWing', 'rearWing', 'ride']], ['Suspension', ['springs', 'arb', 'camber', 'toe']], ['Brakes, diff & tyres', ['brakeBias', 'diff', 'pressure']]];
