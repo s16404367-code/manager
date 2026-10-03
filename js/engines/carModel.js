@@ -94,3 +94,15 @@ export function setupCharacter(s) {
 }
 export function defaultSetup() { return Object.fromEntries(SETUP_KEYS.map((k) => [k, 5])); }
 export const AI_FX = { wearMult: 1, frontBias: 0, damageRisk: 1, topSpeed: 0, mistakeMult: 1, punctureRisk: 0 };
+
+/* Qualifying boost (2026 electrical deployment). The driver chooses where to spend the battery on the lap.
+   full = deploy everywhere (fastest, small risk of running flat before the line), balanced = on the key straights, save = none.
+   Gain scales with PU efficiency, driver skill and how power-sensitive the track is. Applies to every car. */
+export const BOOST_MODES = { full: { k: -0.18, risk: 0.06, name: 'Full deploy' }, balanced: { k: -0.12, risk: 0, name: 'Balanced (key straights)' }, save: { k: 0, risk: 0, name: 'Save battery' } };
+export function boostGain(mode, car, driver, track) {
+  const m = BOOST_MODES[mode] || BOOST_MODES.balanced;
+  const pu = 0.75 + ((car?.puEff || 60) - 50) / 160; const sk = 0.8 + ((driver?.pace || 80) - 70) / 100;
+  const trk = 0.7 + (track?.drag ?? 0.5) * 0.6;
+  return m.k * pu * sk * trk;
+}
+export function aiBoost(team, rng) { return team.aiStyle === 'aggressive' ? 'full' : team.aiStyle === 'conservative' ? (rng.chance(0.5) ? 'balanced' : 'save') : rng.chance(0.35) ? 'full' : 'balanced'; }

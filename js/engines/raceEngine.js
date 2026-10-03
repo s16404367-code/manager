@@ -29,7 +29,7 @@ export function createRace(ctx) {
     trackId: ctx.track.id, laps: ctx.laps, scale: ctx.scale || 1, time: 0, lap: 1, rngS: rng.s,
     weather: ctx.weather, wetness: ctx.weather.wet[0], sc: { state: 'none', lapsLeft: 0, count: 0, vscCount: 0 },
     cars: [], log: [], radio: [], pending: [], chequered: false, finished: false, lineTimes: [0],
-    degMult: ctx.degMult || 1, trackTemp: ctx.weather.trackTemp || 35, fullThrottle: ctx.fullThrottle || 0.6, yellow: null, red: 0, difficulty: ctx.difficulty || 'standard', lapChart: [], alerts: {}, stats: { overtakes: 0 },
+    degMult: ctx.degMult || 1, trackTemp: ctx.weather.trackTemp || 35, fullThrottle: ctx.fullThrottle || 0.6, yellow: null, red: 0, boxOrder: ctx.boxOrder || null, difficulty: ctx.difficulty || 'standard', lapChart: [], alerts: {}, stats: { overtakes: 0 },
   };
   const t = ctx.track;
   const fuelStart = 100;
@@ -116,8 +116,15 @@ export function advance(race, T, track, opts = {}) {
   const rng = new RNG(race.rngS);
   let guard = 0;
   while (guard++ < 500) {
-    let next = null;
+    let next = null, mid = null, midT = Infinity;
     for (const c of race.cars) if (!c.dnf && !c.finished && c.lapEnd <= T && (!next || c.lapEnd < next.lapEnd)) next = c;
+    // half-way round the lap (≈ half a lap before pit entry) every car's pit wall makes the call for this lap
+    for (const c of race.cars) { if (c.dnf || c.finished || c._midLap === c.lapsDone) continue; const m = c.lapStart + (c.lapEnd - c.lapStart) * 0.5; if (m <= T && m < midT) { mid = c; midT = m; } }
+    if (mid && (!next || midT < next.lapEnd)) {
+      mid._midLap = mid.lapsDone; race.time = Math.max(race.time, midT); midLapCall(race, mid, track, rng);
+      if (opts.autoPause && race.pending.some((p) => !p.shown)) { race.rngS = rng.s; return 'pause'; }
+      continue;
+    }
     if (!next) break;
     race.time = next.lapEnd;
     processLap(race, next, track, rng);
@@ -212,9 +219,10 @@ function processLap(race, c, t, rng) {
     c._cliffWarned = true; radio(race, c, 'Tyres are going off — rear grip is dropping fast.');
     raise(race, { type: 'cliff', carId: c.id, text: `${c.short}'s ${COMPOUNDS[c.tyre.c].name}s are near the performance cliff (grip ~${Math.round(100 - c.tyre.wear)}%).` });
   }
-  // pit decision
+  // pit decision (made mid-lap). An unanswered question counts as 'stay out' — we ask again next lap.
+  if (c._ask && !c.pitReq) c._ask = null;
   let pitLoss = 0;
-  const decision = pitDecision(race, c, t, rng);
+  const decision = pitDecision(race, c);
   if (decision) pitLoss = doPit(race, c, decision, t, rng);
   // next lap time
   const base = lapTime(race, c, t, rng) + (c._puncture ? 18 : 0);
@@ -347,26 +355,36 @@ function bestCompoundFor(race, c) {
   return opts[0];
 }
 
-function pitDecision(race, c, t, rng) {
+// Lap-end: the car turns into the pit lane only if a box call was made for this lap.
+function pitDecision(race, c) {
   if (c.pitReq) { const r = c.pitReq; c.pitReq = null; return typeof r === 'string' ? { c: r } : r; }
-  if (!c.isPlayer || !race.askPits) return autoPit(race, c, t, rng);
-  // Player cars: engineers PROPOSE, the principal decides. Never on the final lap.
-  const lapsLeft = race.laps - c.lapsDone;
-  if (lapsLeft <= 1 || (c._askCool || 0) > c.lapsDone || c._ask) return null;
-  const idx = c.planIdx; const d = autoPit(race, c, t, rng, true); c.planIdx = idx;
-  if (!d) return null;
-  c._ask = { c: d.c, why: d.why || 'plan', lap: c.lapsDone };
-  raise(race, { type: 'pitconfirm', carId: c.id, text: `${c.short}: engineers want to box ${d.why === 'weather' ? 'for the weather' : d.why === 'cliff' ? 'because the tyres are finished' : 'as planned'} — next lap, ${COMPOUNDS[d.c].name}s. Grip now ${Math.round(100 - c.tyre.wear)}% (100% = new, 0% = no grip), ${lapsLeft} laps to go.${c.damage > 0 ? ` Car damaged (+${c.damage.toFixed(1)}s/lap) — repair adds ~6s.` : ''} Confirm?` });
   return null;
 }
-function autoPit(race, c, t, rng, early = false) {
+// Mid-lap call (all cars). AI/engineers decide on their own; the player is ASKED (every stop, every repair).
+function midLapCall(race, c, t, rng) {
+  if (c.pitReq) return;
+  const lapNo = c.lapsDone + 1; // the lap the car is on now; the stop would happen at its end
+  if (lapNo >= race.laps) return; // never pit on the final lap (punctures are handled separately)
+  if ((c._askCool || 0) > c.lapsDone) return;
+  const idx = c.planIdx; c.lapsDone++; let d = null;
+  try { d = autoPit(race, c, t, rng, false, !!(c.isPlayer && race.askPits)); } finally { c.lapsDone--; }
+  if (!d && c.isPlayer && race.askPits && c.damage > 0.6 && !c._dmgAsked) { d = { c: c.tyre.c, why: 'damage' }; c._dmgAsked = true; }
+  if (!d) return;
+  if (!(c.isPlayer && race.askPits)) { c.pitReq = d; return; }
+  c.planIdx = idx;
+  c._ask = { c: d.c, used: !!d.used, why: d.why || 'plan', lap: lapNo };
+  const why = { weather: 'for the weather', cliff: 'because the tyres are finished', sc: race.sc.state === 'vsc' ? 'under the VSC (cheap stop)' : 'under the Safety Car (cheap stop)', damage: 'to repair damage', plan: 'as planned' }[d.why] || 'as planned';
+  raise(race, { type: 'pitconfirm', carId: c.id, text: `${c.short} is half-way round lap ${lapNo}. Engineers suggest boxing ${why} at the END OF THIS LAP (lap ${lapNo}) for ${COMPOUNDS[d.c].name}s. Grip now ${Math.round(100 - c.tyre.wear)}%, ${race.laps - lapNo} laps to go after the stop.${c.damage > 0 ? ` Car damaged (+${c.damage.toFixed(1)}s/lap) — repair adds ~6s.` : ''} Nothing happens unless you choose "Box".` });
+}
+function autoPit(race, c, t, rng, early = false, ask = false) {
   const lapsLeft = race.laps - c.lapsDone;
   if (lapsLeft < 1) return null;
   const w = race.wetness;
   const onDry = DRY.includes(c.tyre.c);
   const player = c.isPlayer;
-  const auto = !player || c.autoPlan;
+  const auto = !player || c.autoPlan || ask;
   if (!auto) return null;
+  const planOn = !player || c.autoPlan !== false;
   // weather reactions (AI; player auto-plan follows engineer)
   const lag = c.aiStyle === 'conservative' ? 0.06 : c.aiStyle === 'aggressive' ? -0.02 : 0.02;
   const pl = player ? 0.05 : 0; // engineer auto-calls for player are slightly cautious
@@ -379,17 +397,17 @@ function autoPit(race, c, t, rng, early = false) {
   const C = COMPOUNDS[c.tyre.c];
   const next = c.plan.stops[c.planIdx];
   // cheap stop under SC/VSC
-  if (race.sc.state !== 'none' && !player && lapsLeft > 5) {
+  if (race.sc.state !== 'none' && lapsLeft > 5 && (!player || ask) && !c._scAsked?.[race.sc.count + ':' + race.sc.vscCount]) {
     const near = next && Math.abs(next.lap - c.lapsDone) <= 8 / race.scale ** 0.3;
-    if (near || c.tyre.wear > 40) { c.planIdx++; return { c: next?.c || bestCompoundFor(race, c) }; }
+    if (near || c.tyre.wear > 40) { if (player) (c._scAsked ||= {})[race.sc.count + ':' + race.sc.vscCount] = true; if (next && near) c.planIdx++; return { c: next && near ? next.c : bestCompoundFor(race, c), used: next && near ? !!next.used : false, why: 'sc' }; }
   }
-  if (next) {
+  if (next && planOn) {
     let triggerLap = early ? next.lap - 1 : next.lap; // ask one lap early so the stop happens on the planned lap
     if (!player && c.aiStyle === 'opportunist') {
       const ahead = carAhead(race, c);
       if (ahead && ahead.total && c.total - ahead.total < 2 && next.lap - c.lapsDone <= 2) triggerLap = c.lapsDone; // undercut attempt
     }
-    if ((c.lapsDone >= triggerLap || c.tyre.wear > C.cliff + 4) && (lapsLeft > 2 || !c.isPlayer)) { c.planIdx++; return { c: next.c, why: c.lapsDone >= triggerLap ? 'plan' : 'cliff' }; }
+    if ((c.lapsDone >= triggerLap || c.tyre.wear > C.cliff + 4) && (lapsLeft > 2 || !c.isPlayer)) { c.planIdx++; return { c: next.c, used: !!next.used, why: c.lapsDone >= triggerLap ? 'plan' : 'cliff' }; }
   } else if (c.tyre.wear > C.cliff + 10 && lapsLeft > 4) {
     return { c: bestCompoundFor(race, c), why: 'cliff' };
   }
@@ -409,15 +427,40 @@ function doPit(race, c, d, t, rng) {
   const old = c.tyre.c;
   let startWear = 0;
   if (Array.isArray(c.sets)) { // take the freshest remaining set of that compound
-    const cand = (d.setId && c.sets.find((x) => x.id === d.setId)) || c.sets.filter((x) => x.c === d.c).sort((a, b) => a.wear - b.wear)[0];
+    const ofC = c.sets.filter((x) => x.c === d.c); const usedSets = ofC.filter((x) => x.wear > 2).sort((a, b) => a.wear - b.wear);
+    // a used set = the one with the MOST life left (not first-in-first-out)
+    const cand = (d.setId && c.sets.find((x) => x.id === d.setId)) || (d.used && usedSets[0]) || ofC.filter((x) => x.wear <= 2)[0] || usedSets[0];
     if (cand) { startWear = cand.wear; c.sets.splice(c.sets.indexOf(cand), 1); } else startWear = 35; // none left: scrubbed spare
   }
   if (race.red > 0) stat = 0;
+  // pit-lane traffic (first come, first served). Garages run in last year's order: champion nearest the pit entry.
+  let delay = 0, why = '';
+  if (race.red <= 0) {
+    const box = race.boxOrder ? Math.max(0, race.boxOrder.indexOf(c.teamId)) / Math.max(1, race.boxOrder.length - 1) : 0.5;
+    const A = c.lapEnd; const atBox = A + lane * 0.5 * (0.3 + box * 0.7);
+    race.pitLog ||= [];
+    for (const e of race.pitLog) {
+      if (Math.abs(e.A - A) > 40) continue;
+      if (e.team === c.teamId && e.end > atBox - 0.3) { const w = e.end - atBox + 0.6; if (w > delay) { delay = w; why = 'double-stack: waited for the team-mate'; } }
+    }
+    const rel = atBox + stat + delay;
+    for (const e of race.pitLog) {
+      if (e.team === c.teamId || Math.abs(e.A - A) > 40) continue;
+      const pass = e.A + lane * 0.5 * (0.3 + box * 0.7) + (e.box > box ? 0 : e.stat); // car passing our box in the fast lane
+      if (Math.abs(pass - rel) < 1.1) { delay += 1.1 - Math.abs(pass - rel) + 0.3; why = why || 'held at release for a car in the fast lane'; }
+      if (A - e.A >= 0 && A - e.A < 0.9) { delay += 0.9 - (A - e.A); why = why || 'queued behind a car entering the pit lane'; }
+    }
+    delay = Math.min(8, delay);
+    race.pitLog.push({ id: c.id, team: c.teamId, A, box, stat, end: atBox + stat + delay });
+    if (race.pitLog.length > 60) race.pitLog.shift();
+    if (delay > 0.4) { note += ` (+${delay.toFixed(1)}s ${why})`; if (c.isPlayer) radio(race, c, `Pit traffic: ${why}, lost ${delay.toFixed(1)}s.`); }
+  }
+  stat += delay;
   c.tyre = { c: d.c, age: 0, wear: startWear };
   if (!c.compoundsUsed.includes(d.c)) c.compoundsUsed.push(d.c);
   c.stints.push({ c: d.c, from: c.lapsDone + 1, used: startWear > 2 });
   c._cliffWarned = false;
-  c.stops.push({ lap: c.lapsDone, from: old, to: d.c, stat: +stat.toFixed(1), total: +(stat + lane).toFixed(1), sc: race.sc.state });
+  c.stops.push({ lap: c.lapsDone, from: old, to: d.c, stat: +stat.toFixed(1), total: +(stat + lane).toFixed(1), sc: race.sc.state, delay: +delay.toFixed(1) });
   c.pitLossTotal += stat + lane;
   if (c.isPlayer || c.pos <= 3) pushLog(race, c.lapsDone, `${c.name} pits: ${COMPOUNDS[old].name} → ${COMPOUNDS[d.c].name}, ${stat.toFixed(1)}s${note}.`, c.isPlayer ? 'info' : 'muted', c.id);
   // plan catch-up: if player pitted off-plan, advance plan index past stops earlier than now+3
@@ -458,7 +501,10 @@ export const actions = {
   mode(race, carId, m) { const c = carById(race, carId); if (c && MODE[m]) c.mode = m; },
   ers(race, carId, m) { const c = carById(race, carId); if (c && ERS[m]) c.ers = m; },
   confirmPit(race, carId, comp, setId, repair) { const c = carById(race, carId); if (!c || c.dnf || c.finished) return; c.pitReq = { c: comp, setId, repair, confirmed: true }; c._ask = null; const st = c.plan.stops[c.planIdx]; if (st && Math.abs(st.lap - c.lapsDone) <= 3) c.planIdx++; radio(race, c, `Copy, box this lap for ${COMPOUNDS[comp].name}s.`); },
-  declinePit(race, carId, laps = 2, dropStop = false) { const c = carById(race, carId); if (!c) return; c._ask = null; c._askCool = c.lapsDone + laps; if (dropStop) c.planIdx++; radio(race, c, 'Understood, staying out.'); },
+  declinePit(race, carId, laps = 2, dropStop = false) { const c = carById(race, carId); if (!c) return; c._ask = null; c._askCool = c.lapsDone + laps; const st = c.plan.stops[c.planIdx];
+    if (dropStop) { c.planIdx++; radio(race, c, 'Understood, skipping that stop.'); return; }
+    if (st && st.lap <= c.lapsDone + 1 + laps) st.lap = Math.min(race.laps - 1, c.lapsDone + 1 + laps);
+    radio(race, c, `Understood, staying out. We'll ask again on lap ${c.lapsDone + 1 + laps}.`); },
   // Re-plan remaining stops using the wear actually observed today (race.degMult vs Friday's model).
   replan(race, carId) {
     const c = carById(race, carId); if (!c || c.dnf || c.finished) return;

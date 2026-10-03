@@ -4,7 +4,7 @@
 import { RNG } from '../sim/rng.js';
 import { clamp } from '../sim/util.js';
 import { trackById, lapProfile } from '../data/tracks.js';
-import { effectiveCar, trackScore, carDeficitSec, setupQuality, setupEffects, DRIVER_W } from './carModel.js';
+import { effectiveCar, trackScore, carDeficitSec, setupQuality, setupEffects, DRIVER_W, boostGain, aiBoost } from './carModel.js';
 import { COMPOUNDS, wetPenalty, tyrePaceLoss, wearPerLap, bestFor } from './tyreEngine.js';
 import { lapProfile as lapProf } from '../data/tracks.js';
 import { aiSetupQ, applyProgram, commitQuali, PRACTICE_PROGRAMS, gainKnow, knowOf, AI_KNOW } from './weekendEngine.js';
@@ -44,7 +44,7 @@ export function createSession(state, kind) {
       sess.cars.push({
         did, teamId: team.id, isPlayer: !!team.isPlayer, color: team.color, short: d.name.split(' ').slice(-1)[0], name: d.name,
         st: 'garage', until: team.isPlayer ? 1e9 : rng.range(15, sess.len * (kind === 'quali' ? 0.45 : 0.3)),
-        lapStart: 0, lapLen: t.baseLap, kind: 'out', tyre, push: plan.push || (team.aiStyle === 'aggressive' ? 'max' : 'normal'),
+        lapStart: 0, lapLen: t.baseLap, kind: 'out', tyre, push: plan.push || (team.aiStyle === 'aggressive' ? 'max' : 'normal'), boost: team.isPlayer ? (plan.boost || 'balanced') : aiBoost(team, rng),
         prog: 'setup', plannedPush: kind === 'quali' ? 2 : 6, pushLeft: 0, boxReq: false, runs: 0, runPush: 0,
         newSet: kind === 'quali', setId: null, aiWear: 0, laps: [], best: 1e9, bestS: [1e9, 1e9, 1e9], lastS: [null, null, null], sColor: ['', '', ''], cur: null, deleted: 0,
       });
@@ -78,7 +78,8 @@ function startLap(state, sess, c, kind) {
   const set = setOf(state, c); const wearNow = set ? set.wear : c.aiWear;
   const tyreAge = tyrePaceLoss({ c: c.tyre, wear: wearNow, age: set ? set.laps : c.runPush + 1 }, sess.trackTemp) + (kind === 'push' && wearNow < 3 && sess.kind === 'quali' ? -0.12 : 0);
   const pushK = sess.kind === 'quali' ? { safe: 0.08, normal: 0, max: -0.12 }[c.push] : 0.25;
-  let time = lt - evo + fuel + tyreAge + pushK + rng.normal(0, 0.06 + (100 - d.cons) * 0.005);
+  const team0 = state.teams[c.teamId]; const boostK = sess.kind === 'quali' && kind === 'push' ? boostGain(c.boost, effectiveCar(team0, team0.drivers.indexOf(c.did)), d, t) : 0;
+  let time = lt - evo + fuel + tyreAge + pushK + boostK + rng.normal(0, 0.06 + (100 - d.cons) * 0.005);
   const notes = [];
   if (kind === 'push') {
     const near = sess.cars.filter((o) => o !== c && o.st === 'track' && (((sess.clock - o.lapStart) / o.lapLen) < 0.05 || ((sess.clock - o.lapStart) / o.lapLen) > 0.95)).length;

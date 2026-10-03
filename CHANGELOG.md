@@ -54,3 +54,19 @@
 
 ## 3.0.0
 - First V3 release: quick race, career, full race engine, organisation, business and the save system.
+
+## Round 11
+- Pit calls now happen half-way round the lap, for every car. You are asked about every stop with a clear message: "box at the END of lap N", which set (new, or the used set with the most life left), and whether to repair. You can also stay out 1 or 2 laps (you get asked again on that lap) or skip the stop. Closing the window counts as staying out. This fixes the bug where a car sometimes didn't pit after a strategy change or under SC/VSC.
+- Pit loss for each track now uses the real average. Pit-lane traffic is modelled: garages follow last year's championship order, double-stacked cars wait for their team-mate, there are release holds, and cars queue first come, first served at the pit entry.
+- Timing PIT pill now only shows while the car is in the pit lane, matching the map. A separate BOX tag shows when a stop has been called.
+- Strategy Lab: choose New or Used tyres for the start and for each stop.
+- Qualifying boost modes (full / balanced / save). Every car uses one.
+- 2026 power-unit pool: ICE 4, turbo 4, exhaust 4, MGU-K 3, battery 3, control electronics 3. No MGU-H. Gearboxes have no season limit, but a change in parc fermé means a pit-lane start.
+- Drivers:
+  - Contracts now show when they end ("until end of YYYY season").
+  - Engineer rapport.
+  - Reserve driver: sign, swap into a race seat, gains from tests.
+  - Swap the driver order (favourite shown first).
+  - Academy: scouting list where you sign or reject juniors, release academy drivers, and run junior training.
+- Staff: plan a one-week leave per department. AI teams follow the same rule.
+- Next-season plain-English summary. Team HQ redesign and a new visual theme.

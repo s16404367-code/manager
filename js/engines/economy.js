@@ -121,6 +121,7 @@ export function runTest(state, P, kind, share = 0.5, focus = 'balanced') {
     const g = dl * 0.0055 * (focus === 'drivers' ? 1.4 : focus === 'car' ? 0.6 : 1) * (1 - d.carFam);
     d.carFam = clamp(d.carFam + g, 0, 0.97); out.drv.push({ did, laps: Math.round(dl), gain: g });
   });
+  if (st.reserve && st.drivers[st.reserve]) { const d = st.drivers[st.reserve]; d.carFam = d.carFam ?? 0.2; const g = laps * 0.0018 * (1 - d.carFam); d.carFam = clamp(d.carFam + g, 0, 0.9); out.drv.push({ did: d.id, laps: Math.round(laps * 0.15), gain: g, reserve: true }); } /* reserve driver gets a share of the test programme */
   // a test reveals the real gain of deployed parts
   for (const p of st.projects || []) if (p.stage === 'deployed' && !p.revealed) { p.revealed = true; out.revealed = (out.revealed || 0) + 1; }
   (st.testLog ||= []).push({ season: st.season, kind, week: st.week, laps, car: Math.round(P.carKnow * 100), drv: out.drv.map((x) => ({ did: x.did, fam: Math.round((st.drivers[x.did]?.carFam || 0) * 100) })) });

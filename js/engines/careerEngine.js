@@ -1,4 +1,5 @@
 // Career systems: development, manufacturing, finance, staff, drivers, sponsors, board, AI, events, regulations, seasons.
+import { peopleAfterRace, leaveWeekStart, leaveWeekEnd, onLeave, aiLeaveFactor, ensureAcademy, refreshScouting } from './people.js';
 import { wearRace, fitNew, resetSeason, COMP } from './components.js';
 import { RNG, hashStr } from '../sim/rng.js';
 import { clamp, avg, money, round } from '../sim/util.js';
@@ -83,6 +84,7 @@ export function applyRaceResult(state) {
     const forced = wearRace(state, P, slot, trackById(wk.trackId), state.raceLength || 0.35, c?.dnf || '');
     for (const k of forced) { const pen = fitNew(state, P, slot, k); note(state, pen ? 'warn' : 'info', `${state.drivers[did].name}: ${COMP[k].name} worn out and replaced${pen ? ` — beyond the allocation, ${pen}-place grid penalty next race` : ''}.`); }
   });
+  peopleAfterRace(state);
   // driver training programmes
   for (const did of P.drivers) { const d = state.drivers[did]; const tr = d.training; if (!tr) continue; for (const k of TRAINING[tr.k].stats) d[k] = clamp(round(d[k] + TRAINING[tr.k].gain * (d[k] < d.pot ? 1 : 0.3), 1), 40, 99); tr.left--; if (tr.left <= 0) { note(state, 'good', `${d.name} completed ${TRAINING[tr.k].label}.`); d.training = null; } }
   // finance
@@ -178,7 +180,8 @@ export function betweenRaces(state, weeks = 2) {
   const r = rngOf(state, 'wk' + state.round + state.season + ':' + (state.week || 0));
   const pk = weeks / 2; // event probabilities were tuned per 2-week gap
   const P = pt(state); const diff = diffOf(state);
-  for (let w = 0; w < weeks; w++) { progressProjects(state, r); progressFacilities(state); }
+  const lab = (k) => DEPARTMENTS[k]?.label || k;
+  for (let w = 0; w < weeks; w++) { leaveWeekStart(state, lab); progressProjects(state, r); progressFacilities(state); leaveWeekEnd(state, lab); }
   if (P.autoFit !== false) for (const p of state.projects.filter((x) => x.stage === 'ready')) deployProject(state, p.id, p.qty >= 2 ? null : 0); // parts go straight onto the car
   // staff fatigue/morale
   const active = state.projects.filter((p) => p.stage === 'design' || p.stage === 'manufacturing').length;
@@ -291,6 +294,7 @@ export function startProject(state, tplId, approach, qty = 2) {
 function progressProjects(state, r) {
   for (const p of state.projects) {
     if (p.stage === 'design') {
+      if (onLeave(pt(state), p.dept)) continue; // department on leave: no design progress this week
       p.weeksLeft--; if (pt(state).crunch && r.chance(0.3)) p.weeksLeft--; // crunch: extra progress ~30% of weeks
       if (p.weeksLeft <= 0) {
         if (p.failed && p.detectable) { p.stage = 'failed'; note(state, 'bad', `${p.name}: prototype failed validation — the concept did not deliver. Design cost lost, but no bad parts reach the car.`); continue; }
@@ -299,6 +303,7 @@ function progressProjects(state, r) {
         note(state, 'info', `${p.name}: design complete, now in manufacturing (${p.weeksLeft} wk).`);
       }
     } else if (p.stage === 'manufacturing') {
+      if (onLeave(pt(state), 'mfg')) continue;
       p.weeksLeft--;
       const P = pt(state);
       if (r.chance(0.04 + P.depts.mfg.fatigue * 0.001 - facLvl(P, 'factory') * 0.005)) { p.weeksLeft++; note(state, 'warn', `${p.name}: manufacturing defect found — one week delay.`); }
@@ -487,7 +492,7 @@ function aiDevelop(state, r) {
     const pos = st.findIndex((x) => x.id === t.id) + 1;
     const fac = avg(Object.values(t.facilities)); const org = avg(Object.values(t.depts).map((d) => d.head.skill));
     const budget = { front: 1.15, challenger: 1.05, midfield: 0.95, back: 0.85 }[t.tier] || 1;
-    const rate = 0.55 * budget * (0.5 + org / 120) * (0.6 + fac / 6) * diff.ai;
+    const rate = 0.55 * budget * (0.5 + org / 120) * (0.6 + fac / 6) * diff.ai * aiLeaveFactor(t);
     const ph = PHILOSOPHIES[t.philosophy] || PHILOSOPHIES.balanced;
     const weakest = [...CAR_ATTRS].sort((a, b) => t.car[a] - t.car[b])[0];
     const areas = [r.pick(ph.devBias.length ? ph.devBias : CAR_ATTRS), weakest];
@@ -508,7 +513,7 @@ export function seasonEnd(state) {
   const r = rngOf(state, 'season' + state.season);
   const P = pt(state); const st = standings(state);
   const pos = st.teams.findIndex((t) => t.id === P.id) + 1;
-  const prize = seasonBonus(pos); state._lastPos = pos;
+  const prize = seasonBonus(pos); state._lastPos = pos; state.lastOrder = st.teams.map((x) => x.id);
   ledger(state, 'Income', prize, `Season-end constructors' bonus (P${pos})`, false);
   if (state.loan) { ledger(state, 'Finance', -state.loan, 'Loan repayment', false); state.loan = 0; }
   // cost cap
@@ -610,6 +615,7 @@ export function startNextSeason(state) {
     }
     if (d) delete d._renewed;
   });
+  refreshScouting(state);
   // staff contracts & ageing
   for (const t of Object.values(state.teams)) for (const d of Object.values(t.depts)) { d.head.age++; d.fatigue = Math.max(0, d.fatigue - 30); d.morale = clamp(d.morale + 5, 0, 100); }
   // sponsors & market refresh
