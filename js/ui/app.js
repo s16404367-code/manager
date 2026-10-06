@@ -70,7 +70,7 @@ function shell(inner) {
   const nextTrack = s.calendar[s.round] ? trackById(s.calendar[s.round]) : null;
   const bottom = (quick ? [['weekend', 'Weekend', '🏁'], ['help', 'Help', '❔'], ['settings', 'Settings', '⚙️']] : BOTTOM).map(([r, l, i]) => `<a href="#/${r}" class="${app.route === r ? 'on' : ''}"><span class="i">${i}</span>${l}</a>`).join('') + (quick ? '' : `<a href="javascript:void 0" data-act="more"><span class="i">☰</span>More</a>`);
   return `<header class="topbar">
-    <a class="brand" href="#/${quick ? 'weekend' : 'hq'}" style="text-decoration:none;color:inherit"><span class="logo">${esc(t.abbr)}</span><span class="hide-m">${esc(t.name)}</span></a>
+    <a class="brand" href="#/${quick ? 'weekend' : 'hq'}" style="text-decoration:none;color:inherit"><span class="logo">${esc(t.abbr)}</span><span class="hide-m">${esc(t.name)}</span><span class="v5tag sm hide-m">TP V5.0</span></a>
     <div class="topstats">
       ${quick ? `<div class="s"><span>Quick Race</span>${esc(nextTrack?.name || '')}</div>` : `<div class="s"><span>Season ${s.season}</span>${s.year} · R${Math.min(s.round + 1, s.calendar.length)}/${s.calendar.length}${s.week ? ' · Wk ' + s.week : ''}</div>
       <div class="s"><span>Cash</span><b class="${t.cash < 0 ? 'bad' : ''}">${money(t.cash)}</b></div>

@@ -81,7 +81,10 @@ export function lapTime(race, c, t, rng, isFirst = false) {
     const gap = c.lapEnd - ah.lapEnd;
     if (gap > 0 && gap < 1.2) {
       const ft = race.fullThrottle || 0.6; const k = 1 - gap / 1.2;
-      c.tow = ft * 0.28 * k * (0.6 + t.drag * 0.6);           // time gained on straights
+      // slipstream TRAIN: each extra car in a close chain ahead stacks a little more tow (2nd car gets some, 3rd a bit more...)
+      let n = 1, a = ah, guard = 0; while (guard++ < 6) { const a2 = carAhead(race, a); if (!a2 || a2.finished || a2.lapsDone !== a.lapsDone || a.lapEnd - a2.lapEnd > 1.2) break; n++; a = a2; }
+      c.train = n; const trainK = Math.min(1.45, 1 + 0.15 * (n - 1));
+      c.tow = ft * 0.28 * k * (0.6 + t.drag * 0.6) * trainK * (c.instr === 'follow' ? 1.1 : 1); // time gained on straights
       c.dirtyLoss = (1 - ft) * t.df * 0.45 * k * (1 - 0.2 * ((c.drv.craft ?? 75) - 70) / 30); // time lost in corners (less downforce)
       lt += c.dirtyLoss - c.tow; c.dirty = true;
     } else c.dirty = false;
@@ -94,8 +97,12 @@ export function lapTime(race, c, t, rng, isFirst = false) {
   lt += ((c.drv.morale ?? 70) - 70) * -0.004;
   const sd = 0.08 + (100 - c.drv.cons) * 0.012 + w * 0.25;
   lt += rng.normal(0, sd);
-  const mistakeP = (0.006 + (100 - c.drv.cons) * 0.0006) * (1 + w * 2) * m.inc * (c.setupFx.mistakeMult || 1);
-  if (!isFirst && rng.chance(mistakeP)) { const loss = rng.range(1.2, 4); lt += loss; c._mistake = loss; }
+  if (race.yellow) lt += race.yellow.double ? 0.9 : 0.35; // lift in the yellow sector
+  if (c.instr === 'defend') lt += 0.12; // defensive lines cost a little time
+  // drivers learn from mistakes: each one this race makes the next less likely (and is remembered after the race)
+  const learn = 1 - Math.min(0.45, (c.mistakes || 0) * 0.15) - Math.min(0.15, (c.drv.mkExp || 0) * 0.01);
+  const mistakeP = (0.006 + (100 - c.drv.cons) * 0.0006) * (1 + w * 2) * m.inc * (c.setupFx.mistakeMult || 1) * learn;
+  if (!isFirst && rng.chance(mistakeP)) { const loss = rng.range(1.2, 4); lt += loss; c._mistake = loss; c.mistakes = (c.mistakes || 0) + 1; }
   return safe(lt, t.baseLap + 5);
 }
 
@@ -232,10 +239,13 @@ function processLap(race, c, t, rng) {
   let end = c.lapEnd + base + pitLoss;
   const ahead = carAhead(race, c);
   if (race.sc.state === 'sc') {
+    // Safety Car: field bunches up behind the SC (≈1s apart), no overtaking. A car that pits keeps its pit loss.
     end = c.lapEnd + t.baseLap * SC_PACE + pitLoss;
-    if (ahead && !ahead.finished && ahead.lapsDone === c.lapsDone) end = Math.max(Math.min(end, ahead.lapEnd + 1.0), ahead.lapEnd + 0.8);
+    if (ahead && !ahead.finished && ahead.lapsDone === c.lapsDone) end = pitLoss ? Math.max(end, ahead.lapEnd + 0.8) : Math.max(Math.min(end, ahead.lapEnd + 1.0), ahead.lapEnd + 0.8);
   } else if (race.sc.state === 'vsc') {
-    end = c.lapEnd + base * VSC_PACE + pitLoss;
+    // VSC: every car follows the same delta (≈30% slower) so gaps are frozen — no catching up, no overtaking
+    end = c.lapEnd + (t.baseLap + c.perf) * VSC_PACE + rng.normal(0, 0.15) + pitLoss;
+    if (ahead && !ahead.finished && ahead.lapsDone === c.lapsDone && !ahead._pitLap) end = Math.max(end, ahead.lapEnd + 0.2);
   } else if (ahead && !ahead.finished && ahead.lapsDone === c.lapsDone && end < ahead.lapEnd + 0.25 && !pitLoss) {
     end = resolveBattle(race, c, ahead, end, t, rng);
   } else if (ahead && ahead.lapsDone === c.lapsDone && end < ahead.lapEnd + 0.15) {
@@ -255,13 +265,15 @@ function resolveBattle(race, c, ahead, end, t, rng) {
   const drs = false; // DRS abolished in 2026 — active aero is used by every car, so it is not a passing aid
   const pers = PERSONALITIES[c.drv.pers] || PERSONALITIES.teamplayer;
   if (c.orders === 'hold' && ahead.teamId === c.teamId) return ahead.lapEnd + 0.6;
+  if (c.instr === 'follow') { c.battery = Math.min(100, (c.battery || 0) + 3); return ahead.lapEnd + 0.45 + rng.range(0, 0.2); } // sit in the tow, save battery and tyres
   if (pace > 3 || ahead._pitLap) return Math.min(end, ahead.lapEnd - 0.2); // car ahead pitting / crippled
   let p = 0.08 + pace * 0.4 + (drs ? t.drs * 0.3 : 0) - t.ovt * 0.45 + (c.drv.craft - ahead.drv.craft) * 0.008;
   if (c.ovt) p += 0.14;
   if (ahead.battery > 60 && ahead.ers !== 'save') p -= 0.05; // defending with boost
   p += (c.setupFx.topSpeed - ahead.setupFx.topSpeed) * 1.5 * t.drag;
   p *= pers.ovt;
-  if (race.yellow) p *= 0.6; // one sector under local yellows: no passing there
+  if (race.yellow) p *= race.yellow.double ? 0.33 : 0.67; // no passing in the yellow sector (1 of 3 sectors; double yellow = big slow-down)
+  if (ahead.instr === 'defend') p *= 0.7;
   p += (c.tow || 0) * 0.25;
   if (ahead.teamId === c.teamId && ahead.orders === 'letby') p = 0.95;
   p = clamp(p, 0.02, 0.92);
@@ -298,6 +310,7 @@ function retire(race, c, why, t, rng, mech, crash = false) {
   if (race.sc.state === 'none' && race.lap < race.laps - 1) {
     const pSC = crash ? 0.45 + t.sc * 0.4 : 0.15 + t.sc * 0.2;
     if (rng.chance(pSC)) deploySC(race, rng.chance(crash ? 0.75 : 0.35) ? 'sc' : 'vsc', rng, why);
+    else if (crash) { race.yellow = { sector: rng.int(1, 3), lap: race.lap, double: true }; pushLog(race, race.lap, `🟨🟨 Double yellow, sector ${race.yellow.sector}: car stopped. Slow down, be ready to stop, no overtaking.`, 'warn'); }
   }
   updateOrder(race);
 }
@@ -327,7 +340,7 @@ function onLeaderLap(race, leader, t, rng) {
   if (race.red > 0) { race.red--; if (!race.red) pushLog(race, race.lap, 'Race resumes behind the Safety Car.', 'info'); }
   if (race.sc.state !== 'none') {
     race.sc.lapsLeft--;
-    if (race.sc.lapsLeft <= 0) { pushLog(race, race.lap, race.sc.state === 'sc' ? 'Safety car in this lap — green flag!' : 'VSC ending — green flag!', 'info'); race.sc.state = 'none'; race.drsFrom = race.lap + 2; pushLog(race, race.lap, 'DRS disabled — enabled again in 2 laps.', 'muted'); }
+    if (race.sc.lapsLeft <= 0) { pushLog(race, race.lap, race.sc.state === 'sc' ? 'Safety car in this lap — green flag!' : 'VSC ending — green flag!', 'info'); race.sc.state = 'none'; }
   } else if (race.lap > 1 && race.lap < race.laps - 2 && rng.chance(t.sc * 0.006 * race.scale)) {
     deploySC(race, rng.chance(0.5) ? 'vsc' : 'sc', rng, 'debris on track');
   }
@@ -490,8 +503,8 @@ function teamOrderCheck(race, c, t) {
   }
 }
 
-// DRS: disabled on laps 1–2, under SC/VSC, for 2 laps after a restart, and on a wet track.
-export function drsOn(race) { return race.sc.state === 'none' && !race.yellow && race.lap > 2 && race.lap >= (race.drsFrom || 0) && race.wetness < 0.3; }
+// Active-aero straight mode: off on laps 1–2, under SC/VSC/yellow and on a wet track.
+export function drsOn(race) { return race.sc.state === 'none' && !race.yellow && race.lap > 2 && race.wetness < 0.3; }
 export function raise(race, p) { race.pending.push({ ...p, id: race.pending.length + '_' + race.lap, lap: race.lap, shown: false }); }
 
 function finishRace(race) {
@@ -525,6 +538,7 @@ export const actions = {
     c.autoPlan = true; radio(race, c, `Copy, plan updated: ${c.plan.stops.slice(c.planIdx).map((x) => 'L' + x.lap + ' ' + x.c).join(', ') || 'no stops'}.`);
   },
   auto(race, carId, v) { const c = carById(race, carId); if (c) c.autoPlan = v; },
+  instr(race, carId, k) { const c = carById(race, carId); if (!c) return; c.instr = k === 'race' ? null : k; radio(race, c, k === 'follow' ? 'Copy, I\'ll sit in the tow and save the tyres.' : k === 'defend' ? 'Understood, defending — covering the inside.' : 'OK, free to race.'); },
   orders(race, carId, mateId, kind) {
     const c = carById(race, carId), m = carById(race, mateId); if (!c || !m) return;
     if (kind === 'swap') { m.orders = 'letby'; c.orders = null; pushLog(race, race.lap, `Team orders: ${m.name} to let ${c.name} through.`, 'warn'); radio(race, m, 'Understood… letting him by. Not happy.'); m.drv.morale = (m.drv.morale ?? 70) - 6 * (1.2 - (PERSONALITIES[m.drv.pers]?.orders ?? 0.8)); race.ordersIssued = (race.ordersIssued || 0) + 1; }

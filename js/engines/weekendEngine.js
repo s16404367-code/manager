@@ -310,6 +310,8 @@ function relMultiplier(state, team, did) {
 // Classification & analysis ---------------------------------------------------
 export function classify(state) {
   const wk = state.weekend; const race = wk.race; const t = trackById(wk.trackId);
+  // learning from mistakes (every driver): experience reduces future error rate; a little consistency gained
+  if (!race._learned) { race._learned = true; for (const c of race.cars) { const d = state.drivers[c.driverId]; if (!d || !c.mistakes) continue; d.mkExp = Math.min(30, (d.mkExp || 0) + c.mistakes); if (d.cons < (d.pot || 90)) d.cons = Math.min(99, Math.round((d.cons + 0.15 * c.mistakes) * 100) / 100); } }
   const order = [...race.cars].sort((a, b) => (!!a.dnf - !!b.dnf) || (b.lapsDone - a.lapsDone) || (a.total - b.total));
   const winner = order[0];
   const rows = order.map((c, i) => ({

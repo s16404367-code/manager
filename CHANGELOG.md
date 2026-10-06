@@ -83,3 +83,17 @@
 - Performance: autosave is batched (one disk write instead of many) and flushed when the tab closes. The backup copy is made at most every 10 minutes, and the save size is trimmed. The game pauses when hidden.
 - Saves: "Download save file" + "Load from repo" (saves/savegame.json).
 - Visual polish across the whole UI.
+
+## Round 13
+- SC/VSC/yellow re-checked. SC: field bunches up with no overtaking, and a car that pits under SC now really loses its pit time (before, it was erased). VSC: every car runs the same delta, so gaps are frozen and nobody catches up or overtakes. Single yellow: lift (+0.35s) and no passing in that sector. New double yellow (car stopped, no SC): bigger slow-down. Restart: no Overtake mode for 2 laps.
+- Pit animation is real time. On the lap after a stop the car drives to its box, stands still for the stop time, drives out, then rejoins. A rival can no longer appear behind and then jump ahead later. The timing tower uses the same position.
+- Chequered flag (practice/quali): a flying lap started before the flag is completed and counts. A car on its out-lap at the flag gets no flying lap (message shown), and cars in the garage stay in.
+- Drivers learn from mistakes: within a race/session each mistake makes the next less likely, and experience carries over (+small consistency gain). All drivers.
+- Slipstream train: the 2nd car in a close chain gets the normal tow, and each extra car behind gets a bit more (+15% per car, max +45%).
+- Map ↔ timing selection: click a dot on the map or a row in timing; the selected car is highlighted in both and shows its name tag.
+- New race instruction per car: Race / Follow car ahead (sit in the tow, no attack, saves battery) / Defend (harder to pass, ~0.1s/lap slower).
+
+## V5.0
+- Removed the "restart — Overtake mode in 2 laps" rule and message (not relevant with 2026 active aero).
+- New "Pit Wall" look across the whole game (new css/v5.css): graphite panels with notched corners, volt-green accent plus a team-colour tint, condensed uppercase headings, monospace timing numbers, a redesigned menu, top bar, side menu, tabs, weekend stepper, timing tower, car panels, HQ banner and calendar chips.
+- Version shown as V5.0 (menu, top bar, page title, offline cache tp-v5.0).

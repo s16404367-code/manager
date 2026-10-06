@@ -45,9 +45,11 @@ export function placeCarAt(id, xy) { const g = document.getElementById('m_' + id
 export function showFlag(id, text) { const g = document.getElementById(id + '-flag'); if (!g) return; if (!text) { g.style.display = 'none'; return; } g.style.display = ''; const t = document.getElementById(id + '-flagt'); if (t && t.textContent !== text) t.textContent = text; }
 export const sectorLegend = () => `<div class="row tiny muted" style="gap:.8rem">${SECTOR_COL.map((c, i) => `<span><span class="sw" style="background:${c}"></span>Sector ${i + 1}</span>`).join('')}<span><span class="sw" style="background:#3ddc84"></span>Active aero (X-mode)</span><span>▏start/finish</span><span>┅ pit lane</span></div>`;
 
-export function carDots(cars) {
-  return cars.map((c) => `<g id="m_${c.id}" class="cdot"><circle r="${c.isPlayer ? 2.1 : 1.5}" fill="${c.color}" stroke="${c.isPlayer ? '#fff' : '#05070b'}" stroke-width="${c.isPlayer ? 0.6 : 0.35}"/>${c.isPlayer ? `<text y="-3" font-size="3" text-anchor="middle" fill="#fff" font-weight="800" paint-order="stroke" stroke="#000" stroke-width=".6">${c.tag}</text>` : ''}</g>`).join('');
+export function carDots(cars, selAct = 'teleSel') {
+  // every dot is clickable (selects the car in timing/telemetry); the selected car shows its name tag
+  return cars.map((c) => `<g id="m_${c.id}" class="cdot ${c.isPlayer ? 'pl' : ''}" data-tap="${selAct}" data-arg="${c.id}" style="cursor:pointer"><circle r="4" fill="transparent"/><circle class="dot" r="${c.isPlayer ? 2.1 : 1.5}" fill="${c.color}" stroke="${c.isPlayer ? '#fff' : '#05070b'}" stroke-width="${c.isPlayer ? 0.6 : 0.35}"/><text class="lbl" y="-3" font-size="3" text-anchor="middle" fill="#fff" font-weight="800" paint-order="stroke" stroke="#000" stroke-width=".6">${c.tag}</text></g>`).join('');
 }
+export function markSelected(id) { document.querySelectorAll('.cdot.sel').forEach((g) => { if (g.id !== 'm_' + id) g.classList.remove('sel'); }); const g = document.getElementById('m_' + id); if (g && !g.classList.contains('sel')) { g.classList.add('sel'); g.parentNode.appendChild(g); } }
 export function placeCar(pts, id, d, hidden = false) {
   const g = document.getElementById('m_' + id); if (!g) return;
   if (hidden) { g.style.display = 'none'; return; } g.style.display = '';

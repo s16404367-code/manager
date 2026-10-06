@@ -16,7 +16,7 @@ screen('menu', {
     const m = meta('auto');
     return `<div class="menu-hero"><div class="menu-box">
       <div class="tiny muted" style="letter-spacing:.3em">MOTORSPORT MANAGEMENT SIMULATOR</div>
-      <div class="menu-title">TEAM PRINCIPAL</div>
+      <div class="menu-title">TEAM PRINCIPAL <span class="v5tag">V5.0</span></div>
       <p class="muted" style="max-width:640px">You don't drive the car. You run the organisation — factory, engineers, drivers, development, finances, strategy room and pit wall. Every decision trades something for something else.</p>
       <div class="menu-grid">
         ${m && !m.corrupt ? `<button class="menu-card" data-act="continue" style="border-color:${m.color}"><b>▶ Continue</b><span class="muted small">${esc(m.team)} · ${m.mode === 'quick' ? 'Quick Race' : `Season ${m.season}, R${m.round + 1}/${m.total}`}<br>${new Date(m.at).toLocaleString()}</span></button>` : ''}

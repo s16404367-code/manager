@@ -62,3 +62,5 @@ ul.plain{margin:.2rem 0;padding-left:1.1rem;font-size:.85rem}ul.plain li{margin:
 .tower td.pos{font-weight:900;font-style:italic;width:1.8em;text-align:center}
 .trainbox{border-radius:12px}.tbtn{border-radius:10px}
 .empty{padding:1.2rem;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:12px}
+.cdot .lbl{display:none}.cdot.pl .lbl,.cdot.sel .lbl{display:block}.cdot.sel .dot{stroke:#ffd400;stroke-width:.9}.cdot.sel .lbl{fill:#ffd400}
+.tower tr.sel td{background:rgba(255,212,0,.14)!important;box-shadow:inset 0 0 0 1px rgba(255,212,0,.5)}

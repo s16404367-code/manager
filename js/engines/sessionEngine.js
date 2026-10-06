@@ -87,7 +87,7 @@ function startLap(state, sess, c, kind) {
     const near = sess.cars.filter((o) => o !== c && o.st === 'track' && (((sess.clock - o.lapStart) / o.lapLen) < 0.05 || ((sess.clock - o.lapStart) / o.lapLen) > 0.95)).length;
     if (near && rng.chance(0.12 + t.traffic * 0.15 * near)) { time += rng.range(0.25, 0.9); notes.push('traffic'); }
     const mP = { safe: 0.03, normal: 0.06, max: 0.13 }[c.push] * (1 + sess.wet) * (1 + (100 - d.cons) / 60) * (fx.mistakeMult || 1);
-    if (rng.chance(mP)) { time += rng.range(0.5, 2); notes.push('mistake'); }
+    if (rng.chance(mP * (1 - Math.min(0.4, (c.sessMk || 0) * 0.15)) * (1 - Math.min(0.15, (d.mkExp || 0) * 0.01)))) { time += rng.range(0.5, 2); notes.push('mistake'); c.sessMk = (c.sessMk || 0) + 1; d.mkExp = Math.min(30, (d.mkExp || 0) + 0.5); } /* learns from errors */
     if (rng.chance(0.03 + (c.push === 'max' ? 0.03 : 0) + t.kerb * 0.02)) notes.push('deleted');
     // Slipstream / dirty air: a car 1–3% of a lap ahead gives a tow on the straights; closer than that = dirty air in corners
     const prof = lapProf(t); const ft = prof.fullThrottle || 0.6;
@@ -146,7 +146,7 @@ function finishLap(state, sess, c, lines) {
   // what next?
   const flagged = sess.clock >= sess.len;
   if (cur.kind === 'in' || (flagged && cur.kind !== 'push' && cur.kind !== 'out')) return toGarage(state, sess, c, lines);
-  if (flagged) { return toGarage(state, sess, c, lines, true); }
+  if (flagged) { if (cur.kind === 'out' && c.isPlayer) sess.log.push({ t: sess.clock, text: `${c.name} was still on the out-lap at the flag — no flying lap possible.`, sev: 'warn', pl: true }); return toGarage(state, sess, c, lines, true); }
   if (c.boxReq || c.pushLeft <= 0) { c.boxReq = false; return startLap(state, sess, c, 'in'); }
   if (sess.kind === 'quali' && c.runPush >= 1 && cur.kind === 'push' && c.pushLeft > 0) return startLap(state, sess, c, 'cool');
   return startLap(state, sess, c, 'push');

@@ -9,7 +9,7 @@ import { wetLabel } from '../engines/weatherEngine.js';
 import { DIFFICULTY, deptQ } from '../engines/world.js';
 import { fmtTime, clamp } from '../sim/util.js';
 import { tyreBadge, bar } from './widgets.js';
-import { mapSvg, carDots, placeCar, placeCarAt, pitPoint, showFlag, teleHtml, updateTele, sectorLegend, lapProfile, sampleAt, pointAt } from './trackView.js';
+import { mapSvg, carDots, placeCar, placeCarAt, pitPoint, showFlag, teleHtml, updateTele, sectorLegend, lapProfile, sampleAt, pointAt, markSelected } from './trackView.js';
 import { trackPoints } from '../data/tracks.js';
 
 /* player cars in the team's driver order (Driver 1 = favourite, shown first/left) */
@@ -177,20 +177,37 @@ on({
   dclose: () => { document.getElementById('peekbar')?.remove(); closeModal(); },
 });
 
+// Where a car really is at time T. On the lap after a stop the car first spends the real pit time in the
+// pit lane (drive to the box, stand still, drive out) and only then rejoins at racing speed — so it no longer
+// pops out ahead of a rival and then "drops back" later in the lap.
+function carPos(race, c, T) {
+  if (c.finished) return { f: 0, prog: 1e6 - c.pos };
+  const L = Math.max(1, c.lapEnd - c.lapStart); const el = clamp(T - c.lapStart, 0, L);
+  const st = c.stops.length ? c.stops[c.stops.length - 1] : null;
+  if (st && st.lap === c.lapsDone && el < L) {
+    const W = Math.min(st.total, L * 0.6);
+    if (el < W) {
+      const q = el / W; const sF = clamp(st.stat / W, 0.05, 0.6); const a = (1 - sF) * 0.35;
+      const u = q < a ? 0.5 + 0.12 * (q / a) : q < a + sF ? 0.62 : 0.62 + 0.38 * ((q - a - sF) / Math.max(0.01, 1 - a - sF));
+      return { pitU: u, stationary: q >= a && q < a + sF, f: 0, prog: c.lapsDone + 0.045 * q };
+    }
+    const f = 0.045 + 0.954 * (el - W) / Math.max(1, L - W); return { f, prog: c.lapsDone + f };
+  }
+  const f = Math.min(0.999, el / L); return { f, prog: c.lapsDone + f };
+}
 function drawMap(race, len, trk) {
   const T = race.viewTime ?? race.time;
-  let leaderD = null; const sel = app.tab.teleCar;
+  let leaderD = null; const sel = app.tab.teleCar; if (sel) markSelected(sel);
   const mine = favOrder(race.cars.filter((c) => c.isPlayer)); const selB = mine.find((c) => c.id !== sel)?.id || mine[1]?.id;
   for (const c of race.cars) {
     if (c.dnf) { const g = document.getElementById('m_' + c.id); if (g) g.style.opacity = 0.18; continue; }
-    const f = c.finished ? 0 : clamp((T - c.lapStart) / Math.max(1, c.lapEnd - c.lapStart), 0, 0.999);
+    const cp = carPos(race, c, T); const f = cp.f;
     const d = sampleAt(trk.prof, f).d;
     if (c.pos === 1) leaderD = d;
     // pit lane: entering at the end of a lap with a box call, leaving at the start of the lap after a stop
-    const justPitted = c.stops.length && c.stops[c.stops.length - 1].lap === c.lapsDone && !c.finished;
-    const entering = c.pitReq && d > 0.955; const leaving = justPitted && d < 0.045;
+    const entering = c.pitReq && d > 0.955 && cp.pitU == null; const leaving = cp.pitU != null;
     const inPit = entering || leaving; (app._inPit ||= {})[c.id] = inPit;
-    if (inPit) placeCarAt(c.id, pitPoint(trk.pts, entering ? (d - 0.955) / 0.09 : (d + 0.045) / 0.09)); else placeCar(trk.pts, c.id, d);
+    if (inPit) placeCarAt(c.id, pitPoint(trk.pts, entering ? (d - 0.955) / 0.09 : cp.pitU)); else placeCar(trk.pts, c.id, d);
     if (c.id === sel || c.id === selB) {
       const k = race.sc.state === 'sc' ? 1.45 : race.sc.state === 'vsc' ? 1.3 : 1;
       const drs = drsOn(race) && race.wetness < 0.3;
@@ -262,7 +279,7 @@ function drawUI(race) {
   const lastCls = (c) => { const l = c.laps[c.laps.length - 1]; if (!l || c.laps.length < 2) return ''; if (l <= fl + 1e-6) return 'purple'; return l <= Math.min(...c.laps.slice(1)) + 1e-6 ? 'pb' : ''; };
   // LIVE timing: order by real track progress (lap + fraction of the lap), like the map — not only at the line
   const TT = race.viewTime ?? race.time;
-  const prog = (c) => c.dnf ? -1e6 + c.lapsDone : c.finished ? 1e6 - c.pos : c.lapsDone + clamp((TT - c.lapStart) / Math.max(1, c.lapEnd - c.lapStart), 0, 0.999);
+  const prog = (c) => c.dnf ? -1e6 + c.lapsDone : carPos(race, c, TT).prog;
   const lo = [...order].sort((a, b) => prog(b) - prog(a)); const LP = {}; lo.forEach((c, k) => { LP[c.id] = k + 1; });
   const lapLen = (c) => Math.max(1, c.lapEnd - c.lapStart);
   const liveGap = (c) => { const k = LP[c.id]; if (c.dnf) return 'DNF'; if (k === 1) return c.finished ? 'WIN' : 'Leader'; if (c.finished) return gapOf(race, c, order, mode);
@@ -293,6 +310,7 @@ function carPanel(race, c, order, info) {
   <div class="row small"><span>Ahead <b class="mono">${gA}</b></span><span>Behind <b class="mono">${gB}</b></span>${c.damage > 0 ? `<span class="bad">Damage +${c.damage.toFixed(1)}s</span>` : ''}${c.failurePen > 0 ? `<span class="warn">Fault +${c.failurePen.toFixed(1)}s</span>` : ''}</div>
   <div class="row small" style="margin-top:.3rem">${tyreBadge(c.tyre.c)} <span>${COMPOUNDS[c.tyre.c].name} · ${c.tyre.age} laps · grip ${wear}${c.sets ? ` · sets left: ${['S','M','H','I','W'].map((x) => { const n = c.sets.filter((y) => y.c === x).length; return n ? x + n : ''; }).filter(Boolean).join(' ')}` : ''}${c.dirty ? ' · <span class="warn">dirty air</span>' : ''}</span></div>${bar(100 - c.tyre.wear, 100, c.tyre.wear > cliff ? 'var(--bad)' : c.tyre.wear > cliff - 12 ? 'var(--warn)' : 'var(--good)')}
   <div class="row tiny muted" style="margin-top:.2rem"><span>Fuel ${fuelMargin >= 0 ? '+' : ''}${(fuelMargin / (100 / race.laps)).toFixed(1)} laps</span><span>Battery ${Math.round(c.battery)}%</span><span>${next ? `Plan: L${next.lap} → ${next.c}` : 'No more planned stops'}</span></div>
+  <div class="tiny muted" style="margin-top:.35rem">Instruction ${(() => { const a = order[c.pos - 2]; return a ? `<span class="muted">(car ahead: ${esc(a.short)}${c.train > 1 ? ` · tow train ×${c.train}` : ''})</span>` : ''; })()}</div><div class="seg">${[['race', 'Race'], ['follow', 'Follow car ahead (tow)'], ['defend', 'Defend']].map(([k, l]) => `<button class="btn sm ${(c.instr || 'race') === k ? 'on' : ''}" data-act="rinstr" data-arg="${c.id}:${k}" title="${k === 'follow' ? 'Sit ~0.5s behind in the slipstream: no attack, saves battery, bigger tow' : k === 'defend' ? 'Cover the car behind: much harder to pass, ~0.1s/lap slower' : 'Attack and defend normally'}">${l}</button>`).join('')}</div>
   <div class="tiny muted" style="margin-top:.35rem">Driving mode</div><div class="seg">${MODES.map((m) => `<button class="btn sm ${c.mode === m ? 'on' : ''}" data-act="rmode" data-arg="${c.id}:${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}</div>
   <div class="tiny muted">Overtake mode <span title="2026 rules: extra electric power only when within 1.0s of the car ahead (never for the leader). Battery recharges itself under braking and clipping.">ⓘ</span> ${c.ovt ? '<b class="ok">⚡ ACTIVE</b>' : c.pos === 1 ? '<span class="muted">leader — not available</span>' : '<span class="muted">needs &lt;1.0s gap</span>'}</div><div class="seg">${ERS_MODES.map((m) => `<button class="btn sm ${c.ers === m ? 'on' : ''}" data-act="rers" data-arg="${c.id}:${m}">${m === 'auto' ? 'Use when in range' : 'Save battery'}</button>`).join('')}</div>
   <div class="tiny muted">Pit call ${c.pitReq ? `<b class="warn">— 🅿 BOX at the end of lap ${c.lapsDone + 1} → ${COMPOUNDS[c.pitReq.c].name} ${c.pitReq.used ? '(best used set)' : c.pitReq.setId ? '(chosen set)' : '(new set)'}${c.damage > 0 && c.pitReq.repair !== false ? ' + repair' : ''}</b>` : (c.plan.stops[c.planIdx] ? `next planned stop: lap ${c.plan.stops[c.planIdx].lap} → ${COMPOUNDS[c.plan.stops[c.planIdx].c].name}${c.plan.stops[c.planIdx].used ? ' (used)' : ''} — you\'ll be asked half-way round that lap` : 'no more planned stops')}</div><div class="seg">${['S', 'M', 'H', 'I', 'W'].map((x) => `<button class="btn sm ${c.pitReq?.c === x ? 'on' : ''}" data-act="rpit" data-arg="${c.id}:${x}" title="Box for ${COMPOUNDS[x].name}">${tyreBadge(x)}</button>`).join('')}${c.pitReq ? `<button class="btn sm danger" data-act="rcancel" data-arg="${c.id}">Cancel</button>` : ''}</div>
@@ -314,6 +332,7 @@ on({
     let T = race.viewTime; let g = 0; while (!race.finished && g++ < 20000) { T += 30; advance(race, T, t, {}); }
     race.pending.forEach((p) => (p.shown = true)); race.viewTime = race.time; onFinish();
   },
+  rinstr: (arg) => { const [id, k] = arg.split(':'); actions.instr(R(), id, k); refresh(); },
   rmode: (arg) => { const [id, m] = arg.split(':'); actions.mode(R(), id, m); refresh(); },
   rers: (arg) => { const [id, m] = arg.split(':'); actions.ers(R(), id, m); refresh(); },
   rpit: (arg) => { const [id, c] = arg.split(':'); actions.pit(R(), id, c); refresh(); },

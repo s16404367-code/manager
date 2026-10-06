@@ -4,7 +4,7 @@ import { trackById, trackPoints } from '../data/tracks.js';
 import { advanceSession, simulateRest, commitSession, sendOut, boxThisLap, setCarOpt, ranking, fmt, PRACTICE_PROGRAMS, setsSummary, setGrip, setLaps, chooseSet } from '../engines/sessionEngine.js';
 import { COMPOUNDS } from '../engines/tyreEngine.js';
 import { wetLabel } from '../engines/weatherEngine.js';
-import { mapSvg, carDots, placeCar, placeCarAt, pitPoint, showFlag, teleHtml, updateTele, sectorLegend, lapProfile, sampleAt } from './trackView.js';
+import { mapSvg, carDots, placeCar, placeCarAt, pitPoint, showFlag, teleHtml, updateTele, sectorLegend, lapProfile, sampleAt, markSelected } from './trackView.js';
 import { tyreBadge } from './widgets.js';
 
 const SPEEDS = { normal: 6, fast: 18, vfast: 60 }; /* slower, closer to a real session feel */
@@ -29,7 +29,7 @@ export function startLive() {
   stopLive(); const sess = L(); if (!sess) return;
   const t = trackById(app.state.weekend.trackId); const pts = trackPoints(t); const prof = lapProfile(t);
   const g = document.getElementById('lmap-cars'); if (!g) return;
-  g.innerHTML = carDots(sess.cars.map((c) => ({ id: c.did, color: c.color, isPlayer: c.isPlayer, tag: esc(c.short.slice(0, 3).toUpperCase()) })));
+  g.innerHTML = carDots(sess.cars.map((c) => ({ id: c.did, color: c.color, isPlayer: c.isPlayer, tag: esc(c.short.slice(0, 3).toUpperCase()) })), 'liveSel');
   app.tab.lsel ||= sess.cars.find((c) => c.isPlayer)?.did;
   const st = (app._liveSt ||= { running: true }); st.last = performance.now(); st.ui = 1;
   app.leaveRoute = () => { stopLive(); persist(); };
@@ -38,7 +38,7 @@ export function startLive() {
     if (st.running && !sess.done && !document.querySelector('.modal-back')) {
       advanceSession(app.state, sess.clock + dt * (SPEEDS[app.settings.speed] || 10));
     }
-    const mine = sess.cars.filter((c) => c.isPlayer); const selA = app.tab.lsel; const selB = mine.find((c) => c.did !== selA)?.did;
+    const mine = sess.cars.filter((c) => c.isPlayer); const selA = app.tab.lsel; if (selA) markSelected(selA); const selB = mine.find((c) => c.did !== selA)?.did;
     let box = 0;
     sess.cars.forEach((c) => {
       let tele = null;
