@@ -97,3 +97,7 @@
 - Removed the "restart — Overtake mode in 2 laps" rule and message (not relevant with 2026 active aero).
 - New "Pit Wall" look across the whole game (new css/v5.css): graphite panels with notched corners, volt-green accent plus a team-colour tint, condensed uppercase headings, monospace timing numbers, a redesigned menu, top bar, side menu, tabs, weekend stepper, timing tower, car panels, HQ banner and calendar chips.
 - Version shown as V5.0 (menu, top bar, page title, offline cache tp-v5.0).
+
+## V5.1
+- Reverted the V5.0 "Pit Wall" colour theme: back to the previous (Round 13) graphics/UI.
+- Qualifying: new "Follow for tow" instruction per car — No / Car ahead on track / any specific car. Racecraft affects spacing (tow vs dirty air). AI teams also use it on low-drag tracks.

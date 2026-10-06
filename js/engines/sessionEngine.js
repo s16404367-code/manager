@@ -44,7 +44,7 @@ export function createSession(state, kind) {
       sess.cars.push({
         did, teamId: team.id, isPlayer: !!team.isPlayer, color: team.color, short: d.name.split(' ').slice(-1)[0], name: d.name,
         st: 'garage', until: team.isPlayer ? 1e9 : rng.range(15, sess.len * (kind === 'quali' ? 0.45 : 0.3)),
-        lapStart: 0, lapLen: t.baseLap, kind: 'out', tyre, push: plan.push || (team.aiStyle === 'aggressive' ? 'max' : 'normal'), boost: team.isPlayer ? (plan.boost || 'balanced') : aiBoost(team, rng),
+        lapStart: 0, lapLen: t.baseLap, kind: 'out', tyre, push: plan.push || (team.aiStyle === 'aggressive' ? 'max' : 'normal'), boost: team.isPlayer ? (plan.boost || 'balanced') : aiBoost(team, rng), follow: team.isPlayer ? (plan.follow || null) : (kind === 'quali' && t.drag > 0.6 && rng.chance(0.35) ? 'ahead' : null),
         prog: 'setup', plannedPush: kind === 'quali' ? 2 : 6, pushLeft: 0, boxReq: false, runs: 0, runPush: 0,
         newSet: kind === 'quali', setId: null, aiWear: 0, laps: [], best: 1e9, bestS: [1e9, 1e9, 1e9], lastS: [null, null, null], sColor: ['', '', ''], cur: null, deleted: 0,
       });
@@ -92,7 +92,19 @@ function startLap(state, sess, c, kind) {
     // Slipstream / dirty air: a car 1–3% of a lap ahead gives a tow on the straights; closer than that = dirty air in corners
     const prof = lapProf(t); const ft = prof.fullThrottle || 0.6;
     const gaps = sess.cars.filter((o) => o !== c && o.st === 'track').map((o) => ((sess.clock - o.lapStart) / o.lapLen));
-    if (gaps.some((g) => g > 0.008 && g < 0.03) && rng.chance(0.4)) { time -= ft * rng.range(0.12, 0.35) * (0.6 + t.drag * 0.6); notes.push('tow'); }
+    /* Follow instruction (quali): tuck in behind the car ahead or a chosen car for a planned tow */
+    let fol = null;
+    if (sess.kind === 'quali' && c.follow) {
+      if (c.follow === 'ahead') { const ah = sess.cars.filter((o) => o !== c && o.st === 'track').map((o) => [o, ((sess.clock - o.lapStart) / o.lapLen)]).filter(([, g]) => g > 0 && g < 0.25).sort((a, b) => a[1] - b[1])[0]; fol = ah ? ah[0] : null; }
+      else { const tg = sess.cars.find((o) => o.did === c.follow); fol = tg && tg.st === 'track' ? tg : null; }
+      if (!fol) notes.push('no tow');
+    }
+    if (fol) {
+      const sk = (d.craft || 70) / 100; /* better racecraft = better spacing */
+      if (rng.chance(0.55 + sk * 0.3)) { time -= ft * rng.range(0.2, 0.45) * (0.6 + t.drag * 0.6); notes.push('tow'); }
+      else { time += (1 - ft) * t.df * rng.range(0.1, 0.35); notes.push('dirty air'); }
+      if (fol.follow === c.did || fol.follow === 'ahead') { /* the leading car gets no tow while being used */ }
+    } else if (gaps.some((g) => g > 0.008 && g < 0.03) && rng.chance(0.4)) { time -= ft * rng.range(0.12, 0.35) * (0.6 + t.drag * 0.6); notes.push('tow'); }
     else if (gaps.some((g) => g >= 0 && g <= 0.008) && rng.chance(0.5)) { time += (1 - ft) * t.df * rng.range(0.15, 0.4); notes.push('dirty air'); }
   }
   // reliability: a failure can strike mid-lap (ERS/battery, engine, hydraulics, gearbox)
@@ -239,7 +251,7 @@ export function commitSession(state) {
   if (!sess.done) simulateRest(state);
   if (sess.kind === 'quali') {
     const t = trackById(wk.trackId);
-    const out = ranking(sess).map((c) => ({ did: c.did, teamId: c.teamId, time: (c.best < 1e8) ? c.best : t.baseLap + 4 + c.did.length * 0.001, notes: [...new Set(c.laps.flatMap((l) => l.notes))].map((n) => n === 'deleted' ? 'lap deleted for track limits' : n === 'traffic' ? 'caught in traffic' : n === 'tow' ? 'got a tow' : n === 'dirty air' ? 'lost time in dirty air' : 'mistake on push lap') }));
+    const out = ranking(sess).map((c) => ({ did: c.did, teamId: c.teamId, time: (c.best < 1e8) ? c.best : t.baseLap + 4 + c.did.length * 0.001, notes: [...new Set(c.laps.flatMap((l) => l.notes))].map((n) => n === 'deleted' ? 'lap deleted for track limits' : n === 'traffic' ? 'caught in traffic' : n === 'tow' ? 'got a tow' : n === 'no tow' ? 'tow target not on track' : n === 'dirty air' ? 'lost time in dirty air' : 'mistake on push lap') }));
     commitQuali(state, out, sess.wet);
   } else {
     wk.practice.done++;
