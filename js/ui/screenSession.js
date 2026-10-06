@@ -1,13 +1,13 @@
 // Live practice / qualifying view: animated map, telemetry, timing tower with sector colours, garage controls.
 import { updateSettings, app, on, esc, persist, render, toast, confirmBox } from './app.js';
 import { trackById, trackPoints } from '../data/tracks.js';
-import { advanceSession, simulateRest, commitSession, sendOut, boxThisLap, setCarOpt, ranking, fmt, PRACTICE_PROGRAMS, setsSummary, setGrip, setLaps } from '../engines/sessionEngine.js';
+import { advanceSession, simulateRest, commitSession, sendOut, boxThisLap, setCarOpt, ranking, fmt, PRACTICE_PROGRAMS, setsSummary, setGrip, setLaps, chooseSet } from '../engines/sessionEngine.js';
 import { COMPOUNDS } from '../engines/tyreEngine.js';
 import { wetLabel } from '../engines/weatherEngine.js';
 import { mapSvg, carDots, placeCar, placeCarAt, pitPoint, showFlag, teleHtml, updateTele, sectorLegend, lapProfile, sampleAt } from './trackView.js';
 import { tyreBadge } from './widgets.js';
 
-const SPEEDS = { normal: 10, fast: 30, vfast: 90 };
+const SPEEDS = { normal: 6, fast: 18, vfast: 60 }; /* slower, closer to a real session feel */
 let loop = null;
 const L = () => app.state?.weekend?.live;
 const clockTxt = (x) => { x = Math.max(0, Math.ceil(x)); return `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}`; };
@@ -83,6 +83,10 @@ function drawLiveUI(sess) {
     ${sess.done ? `<button class="btn primary" data-act="liveCommit">${sess.kind === 'quali' ? 'Confirm classification →' : 'Close session & read report →'}</button>` : `<div class="row speed"><button class="btn sm ${st.running ? '' : 'on'}" data-tap="livePause" aria-label="Pause">${st.running ? '⏸' : '▶'}</button>${Object.entries({ normal: '1×', fast: '3×', vfast: '9×' }).map(([k, l]) => `<button class="btn sm ${sp === k ? 'on' : ''}" data-tap="liveSpeed" data-arg="${k}">${l}</button>`).join('')}<button class="btn sm ghost" data-act="liveSkip" title="Simulate to the end">⏭ Simulate</button></div>`}`;
   }
   document.getElementById('sclock').textContent = clockTxt(left);
+  // garage state changed (car came in / went out) → refresh the setup panel so its buttons unlock/lock correctly
+  const gk = sess.cars.filter((c) => c.isPlayer).map((c) => c.st + (c.busyUntil > sess.clock ? 'b' : '')).join(',') + (app.state.weekend.parcFerme ? 'pf' : '');
+  const sw = document.getElementById('setupWrap');
+  if (sw && sw._gk !== gk && !sw.contains(document.activeElement)) { sw._gk = gk; if (app._renderSetup) sw.innerHTML = app._renderSetup(); }
   document.getElementById('sinfo').textContent = `${wetLabel(sess.wet)} · track evolution +${Math.round((sess.clock / sess.len) * 100)}%`;
   // tower
   const rk = ranking(sess); const best = rk[0]?.best;
@@ -103,6 +107,14 @@ function drawLiveUI(sess) {
   if (feed) { const h = sess.log.slice(-40).reverse().map((l) => `<div><span class="l">${clockTxt(sess.len - l.t)}</span><span class="${l.sev}">${esc(l.text)}</span></div>`).join('') || '<div class="muted">Pit lane open. Waiting for cars…</div>'; if (feed._h !== h) { feed.innerHTML = h; feed._h = h; } }
 }
 
+// pick the exact set for the next run: one 'New' button + every used set with its remaining life
+function setChooser(c, garage) {
+  const all = (app.state.weekend.sets?.[c.did] || []).filter((x) => x.c === c.tyre); if (!all.length) return '<div class="tiny muted">No sets of this compound left.</div>';
+  const fresh = all.filter((x) => x.laps === 0); const used = all.filter((x) => x.laps > 0).sort((a, b) => a.wear - b.wear);
+  const cur = c.wantSet || c.setId; const curSet = all.find((x) => x.id === cur);
+  const onNew = curSet ? curSet.laps === 0 : c.newSet;
+  return `<div class="tiny muted" style="margin-top:.25rem">Set for the next run ${garage ? '' : '(choose in the garage)'}</div><div class="seg wrap">${fresh.length ? `<button class="btn sm ${onNew ? 'on' : ''}" data-act="liveSetId" data-arg="${c.did}:${fresh[0].id}" ${garage ? '' : 'disabled'}>🆕 New (${fresh.length} left)</button>` : ''}${used.map((u) => `<button class="btn sm ${cur === u.id ? 'on' : ''}" data-act="liveSetId" data-arg="${c.did}:${u.id}" ${garage ? '' : 'disabled'} title="${u.laps} laps done">Used · ${Math.round(100 - u.wear)}% life · ${u.laps}L</button>`).join('')}</div>`;
+}
 function carCtrl(sess, c) {
   const garage = c.st === 'garage'; const busy = garage && (c.busyUntil || 0) > sess.clock;
   const status = c.st === 'track' ? `${KIND[c.kind]}${c.boxReq ? ' · <b class="warn">boxing this lap</b>' : c.kind === 'push' || c.kind === 'cool' ? ` · ${c.pushLeft} flying lap(s) left` : ''}` : c.st === 'done' ? 'Session complete' : busy ? `${c.fails ? '🔧 Repairing failure' : 'Mechanics working'} (${clockTxt(c.busyUntil - sess.clock)})${c.busyUntil > sess.len ? ' — will miss the rest of the session' : ''}` : c.go ? 'Leaving garage…' : 'In the garage';
@@ -114,7 +126,7 @@ function carCtrl(sess, c) {
   return `<div class="carpanel"><div class="hd"><span class="sw" style="background:${c.color}"></span><b>${esc(c.name)}</b><span class="pill">P${pos}</span><span class="pill">${(c.best < 1e8) ? fmt(c.best) : 'no time'}</span><span class="sp"></span><span class="tiny muted">${c.laps.length} laps${c.deleted ? ` · ${c.deleted} deleted` : ''}</span></div>
   <div class="small" style="margin:.2rem 0 .4rem">${status}</div>
   <div class="tiny" style="margin-bottom:.3rem">On car: ${tyreBadge(c.tyre)} grip ${setGrip(app.state, c)}%${lastT ? ` · last timed lap on ${tyreBadge(lastT)}` : ''}</div>
-  <div class="tiny muted">Tyre ${garage ? '' : '(change in garage)'}</div><div class="seg">${tyres.map((x) => `<button class="btn sm ${c.tyre === x ? 'on' : ''}" data-act="liveTyre" data-arg="${c.did}:${x}" ${garage ? '' : 'disabled'} title="${COMPOUNDS[x].name}">${tyreBadge(x)}</button>`).join('')}<span class="sp"></span><button class="btn sm ${c.newSet ? 'on' : ''}" data-act="liveSet" data-arg="${c.did}:1" ${garage ? '' : 'disabled'}>New set</button><button class="btn sm ${!c.newSet ? 'on' : ''}" data-act="liveSet" data-arg="${c.did}:0" ${garage ? '' : 'disabled'}>Used set</button></div>
+  <div class="tiny muted">Tyre ${garage ? '' : '(change in garage)'}</div><div class="seg">${tyres.map((x) => `<button class="btn sm ${c.tyre === x ? 'on' : ''}" data-act="liveTyre" data-arg="${c.did}:${x}" ${garage ? '' : 'disabled'} title="${COMPOUNDS[x].name}">${tyreBadge(x)}</button>`).join('')}</div>${setChooser(c, garage)}
   <div class="tiny muted" style="margin:.15rem 0 .3rem" title="Real F1 weekend allocation: 13 dry sets (here 8 Soft, 3 Medium, 2 Hard) + 4 Intermediate + 3 Wet per driver. Sets used in practice/quali stay available for the race at their remaining grip.">Sets ⓘ: ${inv || '—'}</div>
   ${sess.kind === 'practice' ? `<div class="tiny muted">Programme</div><div class="seg wrap">${Object.entries(PRACTICE_PROGRAMS).map(([k, p]) => `<button class="btn sm ${c.prog === k ? 'on' : ''}" data-act="liveProg" data-arg="${c.did}:${k}" title="${esc(p.desc)}" ${garage ? '' : 'disabled'}>${p.label}</button>`).join('')}</div>` : `<div class="tiny muted">Push level</div><div class="seg">${[['safe', 'Safe'], ['normal', 'Normal'], ['max', 'Maximum']].map(([k, l]) => `<button class="btn sm ${c.push === k ? 'on' : ''}" data-act="livePush" data-arg="${c.did}:${k}">${l}</button>`).join('')}</div>`}
   <div class="tiny muted">Flying laps per run</div><div class="seg">${lapsOpts.map((n) => `<button class="btn sm ${c.plannedPush === n ? 'on' : ''}" data-act="liveLaps" data-arg="${c.did}:${n}">${n}</button>`).join('')}</div>
@@ -127,7 +139,8 @@ on({
   liveSel: (did) => { app.tab.lsel = did; drawLiveUI(L()); },
   liveOut: (did) => { if (sendOut(app.state, did)) toast('Car released from the garage.', 'info', 1400); drawLiveUI(L()); },
   liveBox: (did) => { boxThisLap(app.state, did); drawLiveUI(L()); },
-  liveTyre: (arg) => { const [did, x] = arg.split(':'); setCarOpt(app.state, did, { tyre: x }); drawLiveUI(L()); },
+  liveTyre: (arg) => { const [did, x] = arg.split(':'); setCarOpt(app.state, did, { tyre: x, wantSet: null }); drawLiveUI(L()); },
+  liveSetId: (arg) => { const [did, id] = arg.split(':'); if (chooseSet(app.state, did, id)) toast('Set selected for the next run.', 'info', 1200); drawLiveUI(L()); },
   liveSet: (arg) => { const [did, x] = arg.split(':'); setCarOpt(app.state, did, { newSet: x === '1' }); drawLiveUI(L()); },
   liveProg: (arg) => { const [did, x] = arg.split(':'); setCarOpt(app.state, did, { prog: x }); drawLiveUI(L()); },
   livePush: (arg) => { const [did, x] = arg.split(':'); setCarOpt(app.state, did, { push: x }); drawLiveUI(L()); },

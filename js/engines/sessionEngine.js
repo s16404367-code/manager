@@ -57,8 +57,10 @@ export function createSession(state, kind) {
 // Tyre sets: pick a new set, or the most-used set of that compound that still has grip
 export function pickSet(state, did, c, wantNew) {
   const sets = (state.weekend.sets?.[did] || []).filter((x) => x.c === c); if (!sets.length) return null;
-  const fresh = sets.filter((x) => x.laps === 0); const used = sets.filter((x) => x.laps > 0 && x.wear < 70).sort((a, b) => b.wear - a.wear);
+  const fresh = sets.filter((x) => x.laps === 0); const used = sets.filter((x) => x.laps > 0 && x.wear < 70).sort((a, b) => a.wear - b.wear); /* used = most life left */
   return wantNew ? (fresh[0] || used[used.length - 1] || sets[0]) : (used[0] || fresh[0] || sets.sort((a, b) => a.wear - b.wear)[0]);
+}
+export function chooseSet(state, did, setId) { const c = state.weekend.live?.cars.find((x) => x.did === did); const set = (state.weekend.sets?.[did] || []).find((x) => x.id === setId); if (!c || !set || c.st === 'track') return false; c.tyre = set.c; c.wantSet = set.id; c.newSet = set.laps === 0; return true;
 }
 function setOf(state, c) { return c.setId ? state.weekend.sets?.[c.did]?.find((x) => x.id === c.setId) : null; }
 export function setGrip(state, c) { const set = setOf(state, c); return Math.round(100 - (set ? set.wear : c.aiWear || 0)); }
@@ -96,9 +98,9 @@ function startLap(state, sess, c, kind) {
   // reliability: a failure can strike mid-lap (ERS/battery, engine, hydraulics, gearbox)
   const team = state.teams[c.teamId]; const car = effectiveCar(team, team.drivers.indexOf(c.did));
   const wearF = team.isPlayer ? 1 + maxWear(team, team.drivers.indexOf(c.did)) / 70 : 1;
-  const failP = 0.0045 * Math.pow(clamp(1.25 - car.reliability / 100, 0.1, 1), 1.3) * wearF * (0.7 + 0.6 * t.eng) * (state.weekend.relBurn?.[c.did] ? 0.85 : 1);
+  const failP = 0.0045 * Math.pow(clamp(1.25 - car.reliability / 100, 0.1, 1), 1.3) * wearF * (0.7 + 0.6 * t.eng) * Math.max(0.5, 1 - 0.17 * (+state.weekend.relBurn?.[c.did] || 0));
   let fail = null;
-  if (rng.chance(failP)) { const ty = rng.pick([['ERS', 'ERS / battery fault'], ['ICE', 'Engine (ICE) issue'], ['HYD', 'Hydraulic leak'], ['GB', 'Gearbox problem']]); fail = { at: rng.range(0.15, 0.9), key: ty[0], text: ty[1], repair: sess.kind === 'quali' ? rng.range(200, 700) : rng.range(420, 1300) }; }
+  if (rng.chance(failP)) { const ty = rng.pick([['MGUK', 'ERS / battery fault'], ['ICE', 'Engine (ICE) issue'], ['HYD', 'Hydraulic leak'], ['GB', 'Gearbox problem']]); fail = { at: rng.range(0.15, 0.9), key: ty[0], text: ty[1], repair: sess.kind === 'quali' ? rng.range(200, 700) : rng.range(420, 1300) }; }
   const lapLen = kind === 'push' ? time : time * (kind === 'out' ? OUT_K : kind === 'in' ? IN_K : COOL_K);
   // Split into sectors via the speed profile, with a little per-sector noise
   const prof = lapProfile(t); const f1 = prof.sectorTf[0], f2 = prof.sectorTf[1];
@@ -202,7 +204,7 @@ export function advanceSession(state, target) {
         if (ready) {
           c.go = false; c.pushLeft = c.isPlayer ? c.plannedPush : sess.kind === 'quali' ? (rngOf(sess).chance(0.35) ? 2 : 1) : Math.round(rngOf(sess).range(3, 9));
           if (!c.isPlayer && sess.kind === 'practice') c.prog = 'setup';
-          if (c.isPlayer) c.setId = pickSet(state, c.did, c.tyre, c.newSet)?.id || null; else { c.aiWear = sess.kind === 'quali' || rngOf(sess).chance(0.5) ? 0 : 15; c.aiLaps = c.aiWear ? 3 : 0; }
+          if (c.isPlayer) { const all = state.weekend.sets?.[c.did] || []; const want = c.wantSet && all.find((x) => x.id === c.wantSet && x.c === c.tyre); const keep = !want && c.setId && all.find((x) => x.id === c.setId && x.c === c.tyre); c.setId = (want || keep || pickSet(state, c.did, c.tyre, c.newSet))?.id || null; c.wantSet = null; } else { c.aiWear = sess.kind === 'quali' || rngOf(sess).chance(0.5) ? 0 : 15; c.aiLaps = c.aiWear ? 3 : 0; }
           startLap(state, sess, c, 'out');
         }
       } else if (c.st === 'garage' && sess.flag) c.st = 'done';

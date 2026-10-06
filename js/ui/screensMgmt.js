@@ -72,7 +72,7 @@ function hqHero(s, t, pos, st, tr) {
   const dCards = t.drivers.map((id, i) => { const d = s.drivers[id]; const dp = st.drivers.findIndex((x) => x.id === id) + 1; return `<div class="hqdrv"><div class="hqnum">${i + 1}</div><div><b>${esc(d.name)}</b><div class="tiny muted">P${dp} · ${d.seasonPts || 0} pts · ${PE.contractText(s, d)}</div><div class="tiny">🎧 ${PE.rapportText(d.rapport)} rapport · morale ${Math.round(d.morale)}</div></div></div>`; }).join('');
   const depts = Object.entries(t.depts).map(([k, d]) => `<div class="hqdept ${d.leave?.on ? 'leave' : ''}" title="${DEPARTMENTS[k].label}: fatigue ${Math.round(d.fatigue)}, morale ${Math.round(d.morale)}${d.leave ? (d.leave.on ? ' — ON LEAVE' : ' — leave booked wk ' + d.leave.start) : ''}">${ring(d.fatigue, 100, (d.leave?.on ? '🏖 ' : '') + DEPARTMENTS[k].label.split(' ')[0], d.fatigue > 60 ? 'var(--bad)' : d.fatigue > 35 ? 'var(--warn)' : 'var(--good)')}</div>`).join('');
   return `<section class="hqhero" style="--tc:${t.color};--tc2:${t.color2 || '#fff'}">
-    <div class="hqtop"><div><div class="hqkick">TEAM HQ · ${s.year} · SEASON ${s.season}</div><h1 class="hqname">${esc(t.name)}</h1><div class="row">${pill(PROFILES[t.profile]?.label || '')}${pill(PHILOSOPHIES[t.philosophy]?.label || '')}${s.reserve ? pill('Reserve: ' + esc(s.drivers[s.reserve]?.name || ''), 'info') : ''}</div></div>${carSvg(t.color, t.color2 || '#ffffff')}</div>
+    <div class="hqtop"><div><div class="hqkick">TEAM HQ · ${s.year} · SEASON ${s.season}</div><h1 class="hqname">${esc(t.name)}</h1><div class="row">${pill(PROFILES[t.profile]?.label || '')}${pill(PHILOSOPHIES[t.philosophy]?.label || '')}${s.reserve ? pill('Reserve: ' + esc(s.drivers[s.reserve]?.name || ''), 'info') : ''}</div></div></div>
     <div class="hqkpis"><div class="kpi"><b>P${pos}</b><span>Constructors</span></div><div class="kpi"><b>${t.points}</b><span>Points</span></div><div class="kpi"><b>P${s.board.target}</b><span>Board target</span></div><div class="kpi"><b class="${t.cash < 0 ? 'bad' : ''}">${money(t.cash)}</b><span>Cash</span></div><div class="kpi"><b>${Math.round(s.board.confidence)}%</b><span>Board</span></div>${tr ? `<div class="kpi next"><b>${esc(tr.gp || tr.name)}</b><span>Next race · R${s.round + 1}/${s.calendar.length}</span></div>` : ''}</div>
     <div class="hqrow"><div class="hqdrvs">${dCards}</div><div class="hqdepts"><div class="tiny muted">Department fatigue (ring) — book 🏖 leave in Staff</div><div class="row" style="gap:.3rem">${depts}</div></div></div>
   </section>`;
@@ -127,11 +127,24 @@ function stepper(p) {
 }
 screen('car', {
   render() {
-    const s = S(); const t = P(); const tab = app.tab.car || 'dev';
+    const s = S(); const t = P(); const tab = app.tab.car || 'auto'; C.ensureAutoDev(t);
     const live = s.projects.filter((p) => ['design', 'manufacturing', 'ready'].includes(p.stage)).length;
-    return `<div class="pagehead"><h1>Car & Development</h1>${helpBtn('development')}</div>${tabs('car', [['dev', '➕ New part'], ['pipe', `🔧 Parts in progress${live ? ` (${live})` : ''}`], ['overview', '🏎️ Car by area'], ['next', '📅 Next-year car'], ['pu', '⚡ Power unit']], tab)}${{ dev: devTab, pipe: pipeTab, overview: overviewTab, next: nextTab, pu: puTab }[tab](s, t)}`;
+    return `<div class="pagehead"><h1>Car & Development</h1>${helpBtn('development')}</div>${tabs('car', [['auto', '🤖 Development plan'], ['dev', '➕ Manual part (advanced)'], ['pipe', `🔧 Parts in progress${live ? ` (${live})` : ''}`], ['overview', '🏎️ Car by area'], ['next', '📅 Next-year car'], ['pu', '⚡ Power unit']], tab)}${{ auto: autoTab, dev: devTab, pipe: pipeTab, overview: overviewTab, next: nextTab, pu: puTab }[tab](s, t)}`;
   },
 });
+function autoTab(s, t) {
+  const ad = C.ensureAutoDev(t);
+  const run = s.projects.filter((p) => ['design', 'manufacturing', 'ready'].includes(p.stage));
+  const done = s.projects.filter((p) => p.stage === 'deployed' && p.deployedSeason !== undefined ? p.deployedSeason === s.season : p.stage === 'deployed').slice(0, 6);
+  return `<div class="card plaincard"><div class="row"><h3 style="margin:0">🤖 Let the technical director develop the car</h3><span class="sp"></span><label class="small" style="margin:0"><input type="checkbox" ${ad.on ? 'checked' : ''} data-change="adOn"> Automatic development ${ad.on ? 'ON' : 'OFF'}</label></div>
+   <p class="small muted">Pick what matters and how much to spend. Every week the engineers start the best part for that goal, build it and fit it to both cars automatically. ${s.schedule && s.week < s.schedule.devOpen ? `<b class="warn">Development opens in week ${s.schedule.devOpen}.</b>` : ''}</p>
+   <h4>Focus</h4><div class="seg wrap">${Object.entries(C.AUTO_FOCUS).map(([k, f]) => `<button class="btn sm ${ad.focus === k ? 'on' : ''}" data-act="adFocus" data-arg="${k}">${f.label}</button>`).join('')}</div>
+   <h4 style="margin-top:.6rem">Spending</h4><div class="seg">${Object.entries(C.AUTO_SPEND).map(([k, f]) => `<button class="btn sm ${ad.spend === k ? 'on' : ''}" data-act="adSpend" data-arg="${k}">${f.label}</button>`).join('')}</div>
+   <p class="tiny muted">Save money = one part at a time, safe designs. Normal = two at a time. Push hard = as many as the factory can handle, riskier designs (bigger gains, more failures). Parts pause if cash drops too low.</p></div>
+   <div class="grid g2"><div class="card"><h3>In progress</h3>${run.map((p) => `<div class="row small" style="margin:.25rem 0"><b>${esc(p.name)}</b><span class="sp"></span>${pill(p.stage === 'ready' ? 'ready' : p.stage + ' · ' + p.weeksLeft + ' wk', p.stage === 'ready' ? 'good' : 'info')}</div>`).join('') || '<div class="muted small">Nothing running.</div>'}</div>
+   <div class="card"><h3>Fitted this season</h3>${done.map((p) => `<div class="small">✅ ${esc(p.name)}</div>`).join('') || '<div class="muted small">None yet.</div>'}<p class="tiny muted">Real gains are confirmed after the next race or test.</p></div></div>`;
+}
+on({ adOn: (a, el) => { C.ensureAutoDev(P()).on = el.checked; persist(); render(); }, adFocus: (k) => { C.ensureAutoDev(P()).focus = k; persist(); render(); }, adSpend: (k) => { C.ensureAutoDev(P()).spend = k; persist(); render(); } });
 function devTab(s, t) {
   const area = app.tab.area || 'floor';
   const list = PROJECTS.filter((p) => areaOfProject(p.id) === area);
@@ -343,6 +356,35 @@ on({ promote: async (arg) => { const [id, slot] = arg.split(':'); const ok = awa
 
 // ---------------- Finance ----------------
 function lastRaceIncome(s) { const r = s.round - 1; const o = {}; for (const l of s.ledger) if (l.season === s.season && l.round === r && l.amount > 0) o[l.text.replace(/ \(.*\)/, '')] = (o[l.text.replace(/ \(.*\)/, '')] || 0) + l.amount; return o; }
+// Race-by-race income statement: income vs recurring and one-off costs, with saving tips
+const RECUR = /salaries|payroll|operating costs|operations|PU|running cost/i;
+function raceStatement(s, t) {
+  const season = s.ledger.filter((l) => l.season === s.season);
+  const rounds = [...new Set(season.map((l) => l.round))].sort((a, b) => b - a);
+  const sel = app.tab.stmt != null && rounds.includes(+app.tab.stmt) ? +app.tab.stmt : rounds[0];
+  if (sel == null) return '';
+  const L = season.filter((l) => l.round === sel);
+  const inc = L.filter((l) => l.amount > 0), rec = L.filter((l) => l.amount < 0 && RECUR.test(l.text)), one = L.filter((l) => l.amount < 0 && !RECUR.test(l.text));
+  const sum = (xs) => xs.reduce((a, l) => a + l.amount, 0);
+  const grp = (xs) => { const o = {}; for (const l of xs) { const k = l.text.replace(/ \(.*\)/, ''); o[k] = (o[k] || 0) + l.amount; } return Object.entries(o).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])); };
+  const rows = (xs) => grp(xs).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="mono" style="text-align:right;color:${v >= 0 ? 'var(--good)' : 'var(--bad)'}">${money(v)}</td></tr>`).join('') || '<tr><td class="muted">—</td><td></td></tr>';
+  const net = sum(L); const tips = [];
+  const by = (re) => -sum(L.filter((l) => l.amount < 0 && re.test(l.text)));
+  if (by(/payroll|Recruitment/) > 2e6) tips.push('Staff payroll is your biggest recurring cost — trim headcount in departments with low workload (Staff screen).');
+  if (by(/Driver salaries/) > 1.5e6) tips.push('Driver salaries are high — at renewal offer shorter deals, or promote a cheaper academy driver.');
+  if (by(/operating costs/) > 0.6e6) tips.push('Facility running costs grow with every upgrade level — only upgrade facilities you really use.');
+  if (by(/Crash|damage/i) > 0) tips.push('Crash damage is a one-off cost you can cut: use calmer driving modes and avoid risky team orders.');
+  if (by(/Design|Manufacture|Second set/) > 3e6) tips.push('Development is one-off spending: switch the development plan to "Save money" if cash is tight.');
+  if (by(/Training|programme|coaching|camp/i) > 0.5e6) tips.push('Driver and academy training are optional one-off costs — pause them when money is short.');
+  if (!tips.length) tips.push('Costs look under control for this race.');
+  return `<div class="card" style="margin-top:1rem"><div class="row"><h3 style="margin:0">🧾 Income statement per race</h3><span class="sp"></span><select data-change="stmtSel" style="width:auto">${rounds.map((r) => `<option value="${r}" ${r === sel ? 'selected' : ''}>${r >= 0 && s.calendar[r] ? `R${r + 1} ${esc(trackById(s.calendar[r])?.name || '')}` : 'Pre-season'}</option>`).join('')}</select></div>
+   <div class="grid g3" style="margin-top:.6rem"><div><h4>Income ${money(sum(inc))}</h4><table class="tbl small">${rows(inc)}</table></div>
+   <div><h4>Recurring costs ${money(sum(rec))}</h4><table class="tbl small">${rows(rec)}</table><p class="tiny muted">Paid every race: salaries, payroll, facility running costs, logistics, PU fee.</p></div>
+   <div><h4>One-off costs ${money(sum(one))}</h4><table class="tbl small">${rows(one)}</table><p class="tiny muted">Your choices: development, parts, upgrades, training, repairs.</p></div></div>
+   <div class="row" style="margin-top:.4rem"><b>Net for this race: <span class="${net >= 0 ? 'good' : 'bad'}">${money(net)}</span></b></div>
+   <h4 style="margin-top:.6rem">💡 Where you can save</h4><ul class="plain rec">${tips.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
+}
+on({ stmtSel: (a, el) => { app.tab.stmt = el.value; render(); } });
 screen('finance', {
   render() {
     const s = S(); const t = P();
@@ -352,6 +394,7 @@ screen('finance', {
     pts[0] = pts[0] / 1e6;
     return `<div class="pagehead"><h1>Finance</h1>${helpBtn('finance')}</div>
     <div class="grid g4"><div class="card stat"><b class="${t.cash < 0 ? 'bad' : ''}">${money(t.cash)}</b><span>Cash</span></div><div class="card stat"><b>${money(t.budgetSpent)}</b><span>Cost-cap spend (cap ${money(COST_CAP)})</span>${bar(t.budgetSpent, COST_CAP, t.budgetSpent > COST_CAP * 0.9 ? 'var(--bad)' : null)}</div><div class="card stat"><b>${money(s.sponsors.reduce((a, x) => a + x.perRace, 0) * 12 / s.calendar.length)}</b><span>Sponsor income / race</span></div><div class="card stat"><b>${money(s.loan || 0)}</b><span>Loan due at season end</span></div></div>
+    ${raceStatement(s, t)}
     <div class="grid g2" style="margin-top:1rem"><div class="card"><h3>Cash this season ($M)</h3>${lineChart([{ name: 'Cash', color: '#2ecc71', points: pts }], { xLabel: 'Transactions' })}</div>
     <div class="card"><h3>By category</h3>${barChart(Object.entries(cats).map(([k, v]) => ({ label: k.slice(0, 8), v, color: v >= 0 ? '#2ecc71' : '#ff4d5e' })), { fmt: money })}</div></div>
     ${t.cash < 10e6 ? `<div class="card" style="margin-top:1rem;border-color:var(--bad)"><h3>Cash-crisis options</h3><div class="row"><button class="btn" data-act="loan" data-arg="10000000">Loan $10M (repay $11.5M, board −5)</button><button class="btn" data-act="loan" data-arg="20000000">Loan $20M (repay $23M, board −5)</button><button class="btn" data-act="advance">Sponsor advance (2 races, 15% discount)</button></div><p class="small muted">Other levers: reduce headcount, pause projects (don't start new ones), delay facility upgrades, sign cheaper drivers.</p></div>` : ''}

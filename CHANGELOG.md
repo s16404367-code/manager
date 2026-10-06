@@ -70,3 +70,16 @@
   - Academy: scouting list where you sign or reject juniors, release academy drivers, and run junior training.
 - Staff: plan a one-week leave per department. AI teams follow the same rule.
 - Next-season plain-English summary. Team HQ redesign and a new visual theme.
+
+## Round 12
+- Practice/qualifying: setup panel now refreshes when a car returns, so "Apply engineer estimate" works again and the "car on track" lock clears. You now pick the exact tyre set for the next run: New, or any used set with its % life left. Default for used = the most life left.
+- Practice/qualifying clock runs slower (1×/3×/9× = 6/18/60 s of session per second).
+- Race timing tower is live: order and gaps follow track position, like the map, not only at the start/finish line.
+- Strategy: an early, late or extra stop (SC, VSC, weather, damage, manual) replaces the nearest planned stop, and the remaining stops are re-spaced. No more "pit again as planned". AI does the same. Fixed AI repeating SC stops lap after lap.
+- HQ: removed the car drawing. The dotted week line is replaced by race chips (last race + next four).
+- Car & Dev: new default "Development plan" tab. Pick a focus and a spending level, and the technical director starts, builds and fits parts automatically. Manual parts are still available as "advanced".
+- Reliability: each reliability run in practice now cuts failure risk (up to −50%). The player's worn-part and fatigue penalties were softened to match the AI.
+- Finance: income statement for every race, split into income, recurring costs and one-off costs, with tips on where to save.
+- Performance: autosave is batched (one disk write instead of many) and flushed when the tab closes. The backup copy is made at most every 10 minutes, and the save size is trimmed. The game pauses when hidden.
+- Saves: "Download save file" + "Load from repo" (saves/savegame.json).
+- Visual polish across the whole UI.

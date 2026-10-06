@@ -76,7 +76,7 @@ with sync_playwright() as p:
             if page.locator('[data-act=resolveEv]').count(): click(page, '[data-act=resolveEv]')
             if page.locator('[data-act=wkNext]:not([disabled])').count(): click(page, '[data-act=wkNext]')
         click(page, '[data-act=guidePage]'); shot(page, f'{tag}_11b_guide'); click(page, '[data-act=modalClose]')
-        page.goto(URL + '#/car'); page.wait_for_timeout(200); click(page, '[data-act=startPrj]')
+        page.goto(URL + '#/car'); page.wait_for_timeout(200); shot(page, f'{tag}_car_auto'); click(page, '[data-arg="car:dev"]'); page.wait_for_timeout(150); click(page, '[data-act=startPrj]')
         # scroll must survive an option click (in-place re-render)
         click(page, '[data-arg="car:dev"]')
         page.evaluate('window.scrollTo(0, 400)'); page.wait_for_timeout(100)

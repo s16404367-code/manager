@@ -49,6 +49,9 @@ export function migrate(data) {
 function strip(state) {
   // Live race state is transient and heavy: store it only if mid-race (resumable) but trim logs.
   const copy = JSON.parse(JSON.stringify(state));
+  if (Array.isArray(copy.ledger)) copy.ledger = copy.ledger.slice(0, 400);
+  if (Array.isArray(copy.inbox)) copy.inbox = copy.inbox.slice(0, 40);
+  if (Array.isArray(copy.news)) copy.news = copy.news.slice(0, 40);
   if (copy.weekend?.race) { copy.weekend.race.log = copy.weekend.race.log.slice(-80); copy.weekend.race.radio = copy.weekend.race.radio.slice(-30); }
   return copy;
 }
@@ -58,8 +61,9 @@ export function save(state, slot = 'auto') {
   if (errs.length) { console.warn('Save validation', errs); repair(state); }
   const payload = JSON.stringify({ v: SAVE_VERSION, at: Date.now(), state: strip(state) });
   try {
-    const prev = store.getItem(`${KEY}:${slot}`);
-    if (prev) store.setItem(`${KEY}:${slot}:bak`, prev);
+    // backup copy at most every 10 minutes (each copy is a large disk write)
+    const bk = `${KEY}:${slot}:bakAt`; const last = +store.getItem(bk) || 0;
+    if (Date.now() - last > 600000) { const prev = store.getItem(`${KEY}:${slot}`); if (prev) store.setItem(`${KEY}:${slot}:bak`, prev); store.setItem(bk, String(Date.now())); }
     store.setItem(`${KEY}:${slot}`, payload);
     return { ok: true };
   } catch (e) { return { ok: false, msg: 'Storage full or unavailable: ' + e.message }; }

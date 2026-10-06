@@ -43,3 +43,22 @@ ul.plain{margin:.2rem 0;padding-left:1.1rem;font-size:.85rem}ul.plain li{margin:
 .seg.nu{margin-left:.3rem}.seg.nu .btn{min-height:26px;padding:.1em .5em;font-size:.72rem}
 @media (max-width:640px){.hqname{font-size:1.6rem}.hqcar{width:100%}}
 .hqstrip select{width:auto;min-width:260px}
+.rchips{display:flex;gap:.4rem;margin-top:.7rem;overflow-x:auto;padding-bottom:2px}
+.rchip{flex:1 0 74px;display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:.4rem .5rem;border-radius:10px;background:var(--bg2);border:1px solid var(--line)}
+.rchip b{font-size:1rem;font-weight:900;letter-spacing:.04em}.rchip .rc-r{font-size:.6rem;color:var(--muted);letter-spacing:.1em}.rchip .rc-n{font-size:.68rem;color:var(--muted)}.rchip .rc-d{font-size:.66rem}
+.rchip.done{opacity:.55}.rchip.next{border-color:var(--accent);background:linear-gradient(160deg,rgba(225,6,0,.22),transparent 70%),var(--bg2);box-shadow:0 0 0 1px rgba(225,6,0,.35)}
+.rchip.more{flex:0 0 auto;justify-content:center;align-items:center;background:transparent;border-style:dashed}
+/* R12 global polish */
+.topbar,header.top{background:linear-gradient(90deg,rgba(7,9,15,.92),color-mix(in srgb,var(--team,#e10600) 10%,rgba(7,9,15,.92)));backdrop-filter:blur(10px);border-bottom:1px solid color-mix(in srgb,var(--team,#e10600) 45%,transparent)!important}
+.sidenav{background:linear-gradient(180deg,rgba(13,17,25,.9),rgba(7,9,15,.9));border-right:1px solid #1a2130}
+.sidenav a{border-radius:10px;transition:background .15s,transform .15s}.sidenav a:hover{background:rgba(255,255,255,.05);transform:translateX(2px)}
+.stepper{display:flex;gap:.3rem;flex-wrap:wrap;align-items:center}
+.stepper>div{flex:1 1 auto;text-align:center;padding:.45rem .6rem;border-radius:999px;background:var(--bg2);border:1px solid var(--line);font-size:.8rem;font-weight:700;color:var(--muted)}
+.stepper>div.on{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#fff;border-color:transparent;box-shadow:0 4px 14px rgba(225,6,0,.35)}
+.stepper>div.done{color:var(--good);border-color:#1d5c3a}
+.swapbtn{flex:0 0 auto}
+.carpanel{border-radius:12px;background:linear-gradient(160deg,color-mix(in srgb,var(--team,#4aa3ff) 9%,transparent),transparent 55%),var(--panel2);border:1px solid var(--line);padding:.7rem}
+.tower table td{padding:.28em .4em}.tower tr.pl td{background:color-mix(in srgb,var(--team,#4aa3ff) 14%,transparent)}
+.tower td.pos{font-weight:900;font-style:italic;width:1.8em;text-align:center}
+.trainbox{border-radius:12px}.tbtn{border-radius:10px}
+.empty{padding:1.2rem;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:12px}

@@ -144,7 +144,7 @@ function applyOne(state, did, prog, rng, mult = 1, lines = []) {
     }
     if (prog === 'conditions') { wk.condKnow[did] = clamp((wk.condKnow[did] || 0) + 0.4 * mult, 0, 0.95); lines.push({ did, prog, text: `${d.name}: aero rakes and wind mapping done. Estimate bias from conditions reduced (confidence ${Math.round(wk.condKnow[did] * 100)}%).` }); }
     if (prog === 'tyrecomp') { wk.tyreKnow = clamp(wk.tyreKnow + 0.2 * mult, 0, 0.95); lines.push({ did, prog, text: `${d.name}: compared compounds back-to-back. Tyre model improved.` }); }
-    if (prog === 'reliability') { wk.relBurn[did] = true; lines.push({ did, prog, text: `${d.name} completed reliability checks. ${pt.car.reliability < 65 ? 'Engineers flagged a marginal hydraulic pressure trace.' : 'No issues found.'}` }); }
+    if (prog === 'reliability') { wk.relBurn[did] = (+wk.relBurn[did] || 0) + 1; /* every reliability run finds more issues */ lines.push({ did, prog, text: `${d.name} completed reliability checks. ${pt.car.reliability < 65 ? 'Engineers flagged a marginal hydraulic pressure trace.' : 'No issues found.'}` }); }
   return lines;
 }
 // Track/car understanding grows with laps run (driver + engineers). Worth up to ~0.3s/lap.
@@ -291,7 +291,7 @@ export function buildRace(state) {
       entries.push({
         sets, startWear, driverId: did, teamId: team.id, name: d.name, short: d.name.split(' ').slice(-1)[0], abbr: team.abbr, color: team.color,
         isPlayer: team.isPlayer, slot, grid: wk.grid.indexOf(did) + 1, drv: d, car, perf, setupQ, setupFx, plan,
-        know: knowOf(state, did), crew: pitCrew(team), relMult: relFac * (wk.relBurn[did] ? 0.88 : 1), fuelLoad: team.isPlayer ? wk.fuel[did] || 1 : 1, aiStyle: team.aiStyle,
+        know: knowOf(state, did), crew: pitCrew(team), relMult: relFac * Math.max(0.5, 1 - 0.17 * (+wk.relBurn[did] || 0)), fuelLoad: team.isPlayer ? wk.fuel[did] || 1 : 1, aiStyle: team.aiStyle,
       });
     });
   }
@@ -302,8 +302,8 @@ export function buildRace(state) {
 }
 function relMultiplier(state, team, did) {
   const slot = team.drivers.indexOf(did);
-  const over = 1 + Math.pow(maxWear(team, slot) / 100, 2) * 1.2; // worn PU/gearbox parts fail more often
-  const fat = 1 + (team.depts.rel.fatigue + team.depts.ops.fatigue) * 0.004;
+  const over = 1 + Math.pow(maxWear(team, slot) / 100, 2) * 0.6; // worn PU/gearbox parts fail more often
+  const fat = 1 + Math.max(0, team.depts.rel.fatigue + team.depts.ops.fatigue - 40) * 0.003; /* same baseline as AI */
   return clamp((1.1 - deptQ(team, 'rel') * 0.004 - facLvl(team, 'relLab') * 0.03) * over * fat, 0.55, 1.6);
 }
 

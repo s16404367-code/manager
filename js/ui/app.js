@@ -10,7 +10,14 @@ export const screen = (name, def) => (screens[name] = def);
 export const on = (map) => Object.assign(acts, map);
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export function go(route, arg) { const h = '#/' + route + (arg != null ? '/' + encodeURIComponent(arg) : ''); if (location.hash === h) render(); else location.hash = h; }
-export function persist(label) { if (!app.state) return; if (app.settings.autosave || app.state.ironman) { const r = save(app.state, 'auto'); if (!r.ok) toast(r.msg, 'bad'); } if (label) toast(label, 'good'); }
+// Autosave is batched: many quick changes = one disk write ~1.5s later (and immediately when the tab is hidden/closed).
+let _saveTimer = null;
+export function flushSave() { if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; } if (!app.state) return; if (app.settings.autosave || app.state.ironman) { const r = save(app.state, 'auto'); if (!r.ok) toast(r.msg, 'bad'); } }
+export function persist(label) { if (!app.state) return; if (!_saveTimer) _saveTimer = setTimeout(flushSave, 1500); if (label) toast(label, 'good'); }
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => { flushSave(); app.hidden = true; });
+  document.addEventListener('visibilitychange', () => { app.hidden = document.hidden; if (document.hidden) { flushSave(); if (app._raceSt) app._raceSt.running = false; if (app._liveSt) app._liveSt.running = false; } });
+}
 export function setState(s) { app.state = s; applyTheme(); }
 export function applyTheme() {
   const r = document.documentElement; const s = app.settings;

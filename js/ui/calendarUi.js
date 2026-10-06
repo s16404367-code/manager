@@ -20,10 +20,10 @@ function cellsByMonth(s) {
 export function yearStrip(s, compact = false) {
   ensureSchedule(s); const sc = s.schedule; if (!sc) return '';
   if (compact) {
-    // one-row progress rail: filled up to today, race pips, pulsing "you are here"
-    const pct = (w) => ((w - 1) / (YEAR_WEEKS - 1)) * 100;
-    return `<div class="yrail"><div class="yrail-fill" style="width:${pct(s.week)}%"></div>${sc.weeks.map((w, i) => `<i class="yp ${i < s.round ? 'done' : i === s.round ? 'next' : ''}" style="left:${pct(w)}%" title="R${i + 1} ${esc(trackById(s.calendar[i])?.name || '')} · ${fmtDate(weekDate(sc.year, w))}"></i>`).join('')}<i class="yhere" style="left:${pct(s.week)}%"></i></div>
-    <div class="yrail-m">${MN.map((m) => `<span>${m[0]}</span>`).join('')}</div>`;
+    // race chips: last race + the next four, each with date and weeks away (replaces the old dotted line)
+    const from = Math.max(0, s.round - 1); const idx = sc.weeks.map((w, i) => i).slice(from, from + 5);
+    return `<div class="rchips">${idx.map((i) => { const t = trackById(s.calendar[i]); const w = sc.weeks[i]; const away = w - s.week; const st = i < s.round ? 'done' : i === s.round ? 'next' : '';
+      return `<div class="rchip ${st}" title="${esc(t?.name || '')}"><span class="rc-r">R${i + 1}</span><b>${t ? flagCode(t) : ''}</b><span class="rc-n">${esc((t?.country || '').slice(0, 12))}</span><span class="rc-d">${i < s.round ? '✓ done' : away <= 0 ? 'this week' : `in ${away} wk`}</span></div>`; }).join('')}<div class="rchip more"><b>${s.round}/${s.calendar.length}</b><span class="rc-d">races done</span></div></div>`;
   }
   const months = cellsByMonth(s);
   return `<div class="ycal">${months.map((cells, m) => `<div class="ycm ${cells.some((c) => c.now) ? 'cur' : ''}"><div class="ycmh">${MN[m]}</div><div class="ycw">${cells.map((c) => `<div class="yc ${c.kind} ${c.past ? 'past' : ''} ${c.now ? 'now' : ''}" title="Week ${c.w} · ${fmtDate(weekDate(sc.year, c.w))}${c.t ? ` · R${c.ri + 1} ${esc(c.t.name)}` : c.kind === 'test' ? ' · Pre-season testing' : c.kind === 'dev' ? ' · Development opens' : c.kind === 'st' ? ' · Year starts' : c.kind === 'end' ? ' · Year closes' : ''}">${c.t ? `<span>${flagCode(c.t)}</span>` : c.kind === 'test' ? '🧪' : c.kind === 'dev' ? '🔧' : c.kind === 'end' ? '🏁' : c.kind === 'st' ? '▶' : ''}</div>`).join('')}</div></div>`).join('')}</div>

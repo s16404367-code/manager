@@ -92,6 +92,7 @@ function practiceAnalysis(s, wk, withApply = false) {
     <div class="tw"><table class="tbl small"><thead><tr><th>Session</th><th>Tyre</th><th>Grip</th><th>Time</th><th>Track</th><th>Wind</th><th>Fuel</th><th>Notes</th>${withApply ? '<th></th>' : ''}</tr></thead><tbody>${runs.map(({ r, i }) => `<tr><td>${r.s} R${r.run}</td><td>${tyreBadge(r.c)}</td><td>${r.grip}%</td><td class="mono">${fmtTime(r.time)}</td><td>${r.temp}°${r.wet > 0.05 ? ' 💧' + Math.round(r.wet * 100) + '%' : ''}</td><td>${r.wind ?? '—'}</td><td>${r.fuel}</td><td class="tiny">${(r.notes || []).join(', ')}</td>${withApply ? `<td><button class="btn sm" data-act="applyRunSetup" data-arg="${did}:${i}" ${wk.parcFerme ? 'disabled' : ''} title="${esc(Object.entries(r.setup || {}).map(([k, v]) => k + ' ' + v).join(', '))}">Apply setup</button></td>` : ''}</tr>`).join('')}</tbody></table></div></div>`;
   }).join('');
 }
+app._renderSetup = () => setupPanel(app.state, app.state.weekend);
 function setupPanel(s, wk) {
   const pt = s.teams[s.player]; const live = wk.live;
   return pt.drivers.map((did) => {
@@ -170,7 +171,7 @@ on({
 });
 
 function practiceView(s, wk, t) {
-  if (wk.live?.kind === 'practice') return daysStrip(wk, 0) + liveView(s, wk, t) + `<h3 style="margin-top:1rem">Setup — garage</h3><div class="grid g2">${setupPanel(s, wk)}</div>`;
+  if (wk.live?.kind === 'practice') return daysStrip(wk, 0) + liveView(s, wk, t) + `<h3 style="margin-top:1rem">Setup — garage</h3><div class="grid g2" id="setupWrap">${setupPanel(s, wk)}</div>`;
   const pt = s.teams[s.player];
   const left = wk.practice.total - wk.practice.done;
   app.tab.prog ||= {};
@@ -193,7 +194,7 @@ on({
 });
 
 function qualiView(s, wk, t) {
-  if (wk.live?.kind === 'quali') return daysStrip(wk, 1) + liveView(s, wk, t) + `<h3 style="margin-top:1rem">Setup — garage</h3><div class="grid g2">${setupPanel(s, wk)}</div>`;
+  if (wk.live?.kind === 'quali') return daysStrip(wk, 1) + liveView(s, wk, t) + `<h3 style="margin-top:1rem">Setup — garage</h3><div class="grid g2" id="setupWrap">${setupPanel(s, wk)}</div>`;
   const pt = s.teams[s.player]; const sess = wk.quali.session;
   const names = ['Q1', 'Q2', 'Q3'];
   const plans = (wk.quali.plans ||= {});

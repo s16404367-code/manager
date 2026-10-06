@@ -182,6 +182,7 @@ export function betweenRaces(state, weeks = 2) {
   const P = pt(state); const diff = diffOf(state);
   const lab = (k) => DEPARTMENTS[k]?.label || k;
   for (let w = 0; w < weeks; w++) { leaveWeekStart(state, lab); progressProjects(state, r); progressFacilities(state); leaveWeekEnd(state, lab); }
+  autoDevelop(state);
   if (P.autoFit !== false) for (const p of state.projects.filter((x) => x.stage === 'ready')) deployProject(state, p.id, p.qty >= 2 ? null : 0); // parts go straight onto the car
   // staff fatigue/morale
   const active = state.projects.filter((p) => p.stage === 'design' || p.stage === 'manufacturing').length;
@@ -271,6 +272,33 @@ export function projectPreview(state, tplId, approach, qty = 2) {
   const mfgCost = tpl.mfg * qty * diffOf(state).cost;
   const mfgWeeks = Math.max(1, Math.round((tpl.weeks / 2.5) / (0.6 + deptQ(P, 'mfg') / 200 + facLvl(P, 'factory') * 0.08)));
   return { tpl, A, expected, unc, failP, cost, mfgCost, weeks, mfgWeeks, corr, atr, qty };
+}
+// ---------- Automatic development (default) ----------
+// The player picks a focus and a spending level; the technical director starts the right parts by himself.
+export const AUTO_FOCUS = {
+  balanced: { label: 'Balanced — fix the weakest areas', attrs: null },
+  aero: { label: 'Aerodynamics (corners)', attrs: ['lowAero', 'medAero', 'highAero'] },
+  speed: { label: 'Straight-line speed', attrs: ['dragEff', 'power', 'puEff'] },
+  mech: { label: 'Mechanical grip & tyres', attrs: ['mech', 'traction', 'braking', 'tyreCare'] },
+  reliability: { label: 'Reliability first', attrs: ['reliability', 'cooling'] },
+};
+export const AUTO_SPEND = { low: { label: 'Save money', approach: 'conservative', slots: 1, minCash: 12e6 }, normal: { label: 'Normal', approach: 'standard', slots: 2, minCash: 6e6 }, high: { label: 'Push hard', approach: 'aggressive', slots: 9, minCash: 3e6 } };
+export function ensureAutoDev(P) { if (!P.autoDev) P.autoDev = { on: true, focus: 'balanced', spend: 'normal' }; return P.autoDev; }
+export function autoDevelop(state) {
+  const P = pt(state); const ad = ensureAutoDev(P); if (!ad.on) return null;
+  if (state.schedule && state.week < state.schedule.devOpen) return null;
+  const sp = AUTO_SPEND[ad.spend] || AUTO_SPEND.normal; if (P.cash < sp.minCash) return null;
+  const active = state.projects.filter((p) => p.stage === 'design' || p.stage === 'manufacturing').length;
+  if (active >= sp.slots) return null;
+  const rivals = Object.values(state.teams).filter((x) => !x.isPlayer);
+  const gap = (k) => avg(rivals.map((r) => r.car[k])) - P.car[k];
+  const want = AUTO_FOCUS[ad.focus]?.attrs || [...CAR_ATTRS].sort((a, b) => gap(b) - gap(a)).slice(0, 3);
+  const busy = new Set(state.projects.filter((p) => ['design', 'manufacturing', 'ready'].includes(p.stage)).map((p) => p.tplId));
+  const cands = PROJECTS.filter((p) => !busy.has(p.id)).map((p) => ({ p, sc: want.reduce((a, k) => a + (p.effects[k] || 0) * (1 + Math.max(0, gap(k)) / 3), 0) })).filter((x) => x.sc > 0).sort((a, b) => b.sc - a.sc);
+  if (!cands.length) return null;
+  const r = startProject(state, cands[0].p.id, sp.approach, 2);
+  if (r.ok) note(state, 'info', `🤖 Technical director started: ${cands[0].p.name} (${AUTO_FOCUS[ad.focus]?.label || 'balanced'}).`);
+  return r;
 }
 export function startProject(state, tplId, approach, qty = 2) {
   const P = pt(state); const pv = projectPreview(state, tplId, approach, qty);

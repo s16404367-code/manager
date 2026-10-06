@@ -399,7 +399,7 @@ function autoPit(race, c, t, rng, early = false, ask = false) {
   // cheap stop under SC/VSC
   if (race.sc.state !== 'none' && lapsLeft > 5 && (!player || ask) && !c._scAsked?.[race.sc.count + ':' + race.sc.vscCount]) {
     const near = next && Math.abs(next.lap - c.lapsDone) <= 8 / race.scale ** 0.3;
-    if (near || c.tyre.wear > 40) { if (player) (c._scAsked ||= {})[race.sc.count + ':' + race.sc.vscCount] = true; if (next && near) c.planIdx++; return { c: next && near ? next.c : bestCompoundFor(race, c), used: next && near ? !!next.used : false, why: 'sc' }; }
+    if ((near || c.tyre.wear > 40) && c.tyre.age >= 3) { (c._scAsked ||= {})[race.sc.count + ':' + race.sc.vscCount] = true; if (next && near) c.planIdx++; return { c: next && near ? next.c : bestCompoundFor(race, c), used: next && near ? !!next.used : false, why: 'sc' }; }
   }
   if (next && planOn) {
     let triggerLap = early ? next.lap - 1 : next.lap; // ask one lap early so the stop happens on the planned lap
@@ -463,8 +463,20 @@ function doPit(race, c, d, t, rng) {
   c.stops.push({ lap: c.lapsDone, from: old, to: d.c, stat: +stat.toFixed(1), total: +(stat + lane).toFixed(1), sc: race.sc.state, delay: +delay.toFixed(1) });
   c.pitLossTotal += stat + lane;
   if (c.isPlayer || c.pos <= 3) pushLog(race, c.lapsDone, `${c.name} pits: ${COMPOUNDS[old].name} → ${COMPOUNDS[d.c].name}, ${stat.toFixed(1)}s${note}.`, c.isPlayer ? 'info' : 'muted', c.id);
-  // plan catch-up: if player pitted off-plan, advance plan index past stops earlier than now+3
-  while (c.plan.stops[c.planIdx] && c.plan.stops[c.planIdx].lap <= c.lapsDone + 3) c.planIdx++;
+  // Plan re-basing (every car). An early/late or unplanned stop (SC, VSC, damage, weather, manual) replaces the
+  // nearest planned stop and the remaining stops are re-spaced from here — no "pit again as planned" afterwards.
+  const now = c.lapsDone; const before = c._idxAtStop ?? 0;
+  let planned = c.planIdx > before ? c.plan.stops[c.planIdx - 1] : null; // this stop consumed a plan stop
+  if (!planned) { const nx = c.plan.stops[c.planIdx]; const prevLap = c.planIdx > 0 ? c.plan.stops[c.planIdx - 1].lap : 0;
+    if (nx && nx.lap - now <= Math.max(3, (nx.lap - prevLap) * 0.5)) { planned = nx; c.planIdx++; } }
+  const rest = c.plan.stops.slice(c.planIdx);
+  if (rest.length) {
+    const ref = planned ? planned.lap : now; const span = Math.max(1, race.laps - ref); const k = (race.laps - now) / span;
+    let last = now; let moved = false;
+    for (const st of rest) { const nl = Math.min(race.laps - 1, Math.max(last + 3, Math.round(now + (st.lap - ref) * k))); if (nl !== st.lap) moved = true; st.lap = nl; last = nl; }
+    if (moved && (planned?.lap !== now)) { c._askCool = 0; if (c.isPlayer) radio(race, c, `Plan adjusted after the ${planned ? (now < planned.lap ? 'early' : 'late') : 'extra'} stop: next stop lap ${rest[0].lap} → ${COMPOUNDS[rest[0].c].name}.`); }
+  } else if (c.isPlayer && planned && planned.lap !== now) radio(race, c, 'That stop covered the plan — no more stops planned. We\'ll tell you if the tyres won\'t make it.');
+  c._idxAtStop = c.planIdx;
   return stat + lane;
 }
 
